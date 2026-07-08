@@ -1,0 +1,148 @@
+output "architecture_profile" {
+  description = "Deployment profile implemented by this module."
+  value       = "production-multi-az-deep-dive"
+}
+
+output "vpc_id" {
+  description = "Production VPC ID."
+  value       = aws_vpc.main.id
+}
+
+output "primary_az" {
+  description = "Primary production AZ."
+  value       = local.az_names[0]
+}
+
+output "alb_dns_name" {
+  description = "Public ALB DNS name for Backend API."
+  value       = aws_lb.app.dns_name
+}
+
+output "app_cloudfront_url" {
+  description = "Production CloudFront URL in front of the application ALB."
+  value       = "https://${aws_cloudfront_distribution.app_edge.domain_name}"
+}
+
+output "app_route53_record_fqdn" {
+  description = "Optional Route53 alias record for the production app edge."
+  value       = length(aws_route53_record.app_edge_a) > 0 ? aws_route53_record.app_edge_a[0].fqdn : null
+}
+
+output "shield_advanced_enabled" {
+  description = "Whether Shield Advanced protections are enabled by Terraform."
+  value       = var.enable_shield_advanced
+}
+
+output "dashboard_cloudfront_url" {
+  description = "CloudFront URL for the SOC dashboard."
+  value       = "https://${aws_cloudfront_distribution.dashboard.domain_name}"
+}
+
+output "dashboard_bucket" {
+  description = "Private S3 bucket for static dashboard assets."
+  value       = aws_s3_bucket.dashboard.id
+}
+
+output "raw_logs_bucket" {
+  description = "Immutable raw logs bucket."
+  value       = aws_s3_bucket.raw_logs.id
+}
+
+output "processed_logs_bucket" {
+  description = "Processed logs bucket."
+  value       = aws_s3_bucket.processed_logs.id
+}
+
+output "audit_logs_bucket" {
+  description = "Object Lock enabled audit log bucket."
+  value       = aws_s3_bucket.audit.id
+}
+
+output "raw_log_firehose_name" {
+  description = "Kinesis Data Firehose stream for raw logs."
+  value       = aws_kinesis_firehose_delivery_stream.raw_logs.name
+}
+
+output "preprocessor_lambda_name" {
+  description = "Lambda preprocessing function."
+  value       = aws_lambda_function.preprocessor.function_name
+}
+
+output "ecs_cluster_name" {
+  description = "ECS cluster name."
+  value       = aws_ecs_cluster.main.name
+}
+
+output "ecs_service_names" {
+  description = "Production ECS services."
+  value       = concat(keys(aws_ecs_service.app), keys(aws_ecs_service.security))
+}
+
+output "ecr_repository_urls" {
+  description = "ECR repository URLs keyed by service."
+  value       = { for name, repo in aws_ecr_repository.service : name => repo.repository_url }
+}
+
+output "rds_endpoint" {
+  description = "RDS PostgreSQL endpoint."
+  value       = aws_db_instance.postgres.address
+}
+
+output "rds_secret_arn" {
+  description = "Secrets Manager secret containing generated DB credentials."
+  value       = aws_secretsmanager_secret.db.arn
+}
+
+output "redis_endpoint" {
+  description = "Redis primary endpoint."
+  value       = aws_elasticache_replication_group.redis.primary_endpoint_address
+}
+
+output "dynamodb_leader_lock_table" {
+  description = "DynamoDB leader lock table for HA orchestrator."
+  value       = aws_dynamodb_table.leader_lock.name
+}
+
+output "opensearch_vector_endpoint" {
+  description = "OpenSearch vector engine endpoint."
+  value       = aws_opensearch_domain.vectors.endpoint
+}
+
+output "step_functions_state_machine_arn" {
+  description = "SOC playbook orchestrator state machine."
+  value       = aws_sfn_state_machine.orchestrator.arn
+}
+
+output "sns_alerts_topic_arn" {
+  description = "SNS topic for real-time notifications."
+  value       = aws_sns_topic.alerts.arn
+}
+
+output "cloudwatch_dashboard_name" {
+  description = "CloudWatch dashboard name."
+  value       = aws_cloudwatch_dashboard.soc.dashboard_name
+}
+
+output "github_actions_role_arn" {
+  description = "GitHub Actions deploy role ARN, if enabled."
+  value       = var.enable_github_oidc ? aws_iam_role.github_actions[0].arn : null
+}
+
+output "cost_controls" {
+  description = "Production resilience and control switches."
+  value = {
+    single_az_workload             = false
+    multi_az_app                   = true
+    multi_az_data                  = true
+    nat_gateway_per_az             = true
+    ecs_container_insights_enabled = var.enable_ecs_container_insights
+    opensearch_managed_domain      = true
+    audit_object_lock_days         = max(var.audit_retention_days, 365)
+    guardduty_enabled              = true
+    securityhub_enabled            = true
+    config_enabled                 = true
+    cloudfront_app_edge_enabled    = true
+    route53_alias_enabled          = length(aws_route53_record.app_edge_a) > 0
+    shield_advanced_enabled        = var.enable_shield_advanced
+  }
+}

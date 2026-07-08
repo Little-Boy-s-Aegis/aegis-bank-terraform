@@ -1,14 +1,239 @@
-# aegis-bank-terraform
+# AI-Native SOC Terraform
 
-Infrastructure-as-Code (IaC) configuration using Terraform to deploy the Aegis Banking platform on AWS.
+This repository contains two separate Terraform implementations for the AI-Native SOC Platform:
 
-## Provisioned AWS Resources:
-* **Networking**: Custom VPC, 3 public subnets, 3 private subnets, NAT gateway, Route Tables, and VPC Flow Logs.
-* **Security & Key Management**: Scoped KMS Customer Managed Keys and Key Aliases for unified data encryption at rest.
-* **Compute**: Amazon EKS Kubernetes Cluster with Managed Node Groups.
-* **Container Registry**: 8 AWS ECR repositories for container image management.
-* **Database**: Amazon RDS PostgreSQL (encrypted with KMS key).
-* **Caching**: Amazon ElastiCache Redis.
-* **Streaming**: Amazon MSK Kafka cluster (encrypted with KMS key, supporting TLS and Plaintext clients).
-* **Identity & Access Management**: EKS OpenID Connect (OIDC) identity provider and IAM Roles for Service Accounts (IRSA) for secure pod role association.
-* **Storage**: WORM-compliant compliance logs S3 bucket with Object Lock in COMPLIANCE mode and versioning enabled.
+- `hackathon`: cost-optimized MVP, single-AZ workload placement, serverless-first, low monthly cost.
+- `production`: production deep-dive architecture, two Availability Zones, separated subnet tiers, stronger security, audit, observability, and edge controls.
+
+Select the stack with `deployment_profile`.
+
+## Folder Layout
+
+```text
+terraform/
+  environments/
+    hackathon/
+      terraform.tfvars
+    production/
+      terraform.tfvars
+  modules/
+    hackathon/
+      main.tf
+      variables.tf
+      outputs.tf
+      alb/
+      bedrock/
+      cicd/
+      cloudfront/
+      cloudwatch/
+      dynamodb/
+      ecr/
+      ecs/
+      eventbridge/
+      firehose/
+      iam/
+      kinesis/
+      kms/
+      lambda/
+      monitoring/
+      opensearch/
+      rds/
+      redis/
+      s3/
+      secrets-manager/
+      security-groups/
+      ses/
+      shield/
+      sns/
+      sqs/
+      step-functions/
+      vpc/
+      vpc-endpoints/
+      waf/
+      xray/
+    production/
+      main.tf
+      variables.tf
+      outputs.tf
+      alb/
+      api-gateway/
+      bedrock/
+      cicd/
+      cloudfront/
+      cloudtrail/
+      cloudwatch/
+      config/
+      dynamodb/
+      ecr/
+      ecs/
+      eventbridge/
+      firehose/
+      guardduty/
+      iam/
+      kinesis/
+      kms/
+      lambda/
+      monitoring/
+      nat-gateway/
+      opensearch/
+      rds/
+      redis/
+      route53/
+      s3/
+      sagemaker/
+      secrets-manager/
+      security-groups/
+      security-hub/
+      ses/
+      shield/
+      sns/
+      sqs/
+      step-functions/
+      vpc/
+      vpc-endpoints/
+      waf/
+      xray/
+  .terraform.lock.hcl
+  locals.tf
+  main.tf
+  outputs.tf
+  terraform.tfvars
+  variables.tf
+  versions.tf
+```
+
+The root folder is only the stack entrypoint. `modules/hackathon` and `modules/production` are now separated clearly. Every stack folder and every service folder inside it follows the same `main.tf`, `variables.tf`, `outputs.tf` convention.
+
+## Hackathon Profile
+
+Module: `modules/hackathon`
+
+Designed for the cost-optimized hackathon diagrams:
+
+- Single-AZ workload placement for ECS/RDS/Redis
+- No NAT Gateway by default
+- Private ECS Fargate services with VPC endpoints
+- Firehose -> S3 Raw Logs -> Lambda Preprocessing -> S3 Processed Logs
+- Layer 1 AI Agents, Layer 2 Meta Analyzer, Worker, Backend API, HA Orchestrator
+- Step Functions playbook orchestration
+- S3 + CloudFront SOC dashboard
+- SNS/SES/Telegram/Slack/Jira-ready notification layer
+- CloudWatch/X-Ray/EventBridge observability
+- Firehose -> S3 Object Lock audit archive
+
+AWS reality check: ALB and RDS subnet groups require at least two AZs, so the hackathon module keeps workload services in one AZ and creates small spare subnets only for AWS control-plane requirements.
+
+## Production Profile
+
+Module: `modules/production`
+
+Designed for the production architecture diagrams:
+
+- Edge path: Users -> optional Route53 -> CloudFront app edge -> ALB -> ECS backend
+- AWS Shield Standard is implicit; optional Shield Advanced resources can be enabled
+- Regional AWS WAF attached to the public ALB
+- VPC `10.0.0.0/16` across two Availability Zones
+- Public subnets: ALB and NAT Gateway per AZ
+- Private app subnets: Backend API, Layer 1 AI Agents, Layer 2 Meta Analyzer, Worker, Active/Standby Orchestrators
+- Private security subnets: OPA Policy Engine, Internal Connectors, SSM utilities
+- Private data subnets: RDS PostgreSQL Multi-AZ, ElastiCache Redis replication group, OpenSearch managed domain
+- Ingestion: Kinesis Data Streams, SQS, Lambda preprocessing, Firehose, raw/processed S3 buckets
+- AI services integration: Bedrock runtime, SageMaker runtime, Secrets Manager, KMS
+- Decision and orchestration: OpenSearch vector store, Step Functions, EventBridge hourly rotation, DynamoDB leader lock
+- Notifications: SNS, SES identity, Telegram/Slack/Jira/ServiceNow secrets
+- Observability: CloudWatch Logs, CloudWatch Dashboard, CloudWatch Alarms, X-Ray
+- Audit and governance: Firehose, S3 Object Lock, CloudTrail, AWS Config, GuardDuty, Security Hub
+- CI/CD: ECR repositories and optional GitHub Actions OIDC role
+
+Production is intentionally more expensive and more resilient than the hackathon profile.
+
+## Deploy
+
+Initialize once:
+
+```bash
+cd terraform
+terraform init
+```
+
+Plan hackathon:
+
+```bash
+terraform plan -var-file=environments/hackathon/terraform.tfvars
+```
+
+Plan production:
+
+```bash
+terraform plan -var-file=environments/production/terraform.tfvars
+```
+
+Apply the selected profile:
+
+```bash
+terraform apply -var-file=environments/production/terraform.tfvars
+```
+
+## Production Edge Options
+
+The production profile always creates a CloudFront distribution in front of the application ALB.
+
+Optional DNS:
+
+```hcl
+app_domain_name     = "soc.example.com"
+app_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+route53_zone_id     = "Z1234567890"
+```
+
+Optional Shield Advanced:
+
+```hcl
+enable_shield_advanced = true
+```
+
+Only enable Shield Advanced if the AWS account already has an active Shield Advanced subscription.
+
+## Container Images
+
+Terraform creates ECR repositories. By default, ECS task definitions point to `:latest` in those repos. Push images after `terraform apply`, or set `container_image_overrides`.
+
+Production service keys:
+
+- `backend-api`
+- `layer1-auth-agent`
+- `layer1-api-agent`
+- `layer1-infra-agent`
+- `layer2-meta-analyzer`
+- `worker-service`
+- `orchestrator-active`
+- `orchestrator-standby`
+- `opa-policy-engine`
+- `internal-connectors`
+- `ssm-utilities`
+
+Hackathon service keys:
+
+- `backend-api`
+- `layer1-agents`
+- `layer2-meta-analyzer`
+- `worker-service`
+- `orchestrator-ha`
+
+## Key Outputs
+
+- `architecture_profile`
+- `app_cloudfront_url`
+- `alb_dns_name`
+- `dashboard_cloudfront_url`
+- `raw_log_firehose_name`
+- `ecs_cluster_name`
+- `ecs_service_names`
+- `ecr_repository_urls`
+- `rds_endpoint`
+- `redis_endpoint`
+- `opensearch_vector_endpoint`
+- `step_functions_state_machine_arn`
+- `sns_alerts_topic_arn`
+- `cloudwatch_dashboard_name`
+- `cost_controls`

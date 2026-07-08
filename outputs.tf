@@ -1,49 +1,138 @@
-output "eks_cluster_name" {
-  description = "EKS Cluster Name"
-  value       = aws_eks_cluster.cluster.name
+locals {
+  active_profile = var.deployment_profile == "production" ? module.production[0] : module.hackathon[0]
 }
 
-output "eks_endpoint" {
-  description = "EKS Cluster Control Plane Endpoint"
-  value       = aws_eks_cluster.cluster.endpoint
+output "architecture_profile" {
+  description = "Deployment profile implemented by this Terraform stack."
+  value       = local.active_profile.architecture_profile
 }
 
-output "rds_endpoint" {
-  description = "PostgreSQL RDS connection endpoint"
-  value       = aws_db_instance.postgres.address
+output "vpc_id" {
+  description = "VPC ID."
+  value       = local.active_profile.vpc_id
 }
 
-output "redis_endpoint" {
-  description = "Redis Cache node connection endpoint"
-  value       = aws_elasticache_cluster.redis.cache_nodes[0].address
+output "primary_az" {
+  description = "Primary AZ for workloads."
+  value       = local.active_profile.primary_az
 }
 
-output "msk_bootstrap_brokers" {
-  description = "Kafka brokers bootstrap endpoints"
-  value       = aws_msk_cluster.kafka.bootstrap_brokers
+output "alb_dns_name" {
+  description = "Public ALB DNS name for Backend API."
+  value       = local.active_profile.alb_dns_name
 }
 
-output "s3_log_bucket" {
-  description = "S3 compliance log bucket"
-  value       = aws_s3_bucket.logs.id
+output "app_cloudfront_url" {
+  description = "Production CloudFront URL in front of the application ALB, if the selected profile creates one."
+  value       = local.active_profile.app_cloudfront_url
 }
 
-output "kubeconfig_update_command" {
-  description = "Command to update local kubeconfig for EKS access"
-  value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${aws_eks_cluster.cluster.name}"
+output "app_route53_record_fqdn" {
+  description = "Optional Route53 alias record for the production app edge."
+  value       = local.active_profile.app_route53_record_fqdn
+}
+
+output "shield_advanced_enabled" {
+  description = "Whether Shield Advanced protections are enabled by Terraform."
+  value       = local.active_profile.shield_advanced_enabled
+}
+
+output "dashboard_cloudfront_url" {
+  description = "CloudFront URL for the SOC dashboard."
+  value       = local.active_profile.dashboard_cloudfront_url
+}
+
+output "dashboard_bucket" {
+  description = "Private S3 bucket for static dashboard assets."
+  value       = local.active_profile.dashboard_bucket
+}
+
+output "raw_logs_bucket" {
+  description = "S3 bucket receiving raw logs."
+  value       = local.active_profile.raw_logs_bucket
+}
+
+output "processed_logs_bucket" {
+  description = "S3 bucket receiving processed logs."
+  value       = local.active_profile.processed_logs_bucket
+}
+
+output "audit_logs_bucket" {
+  description = "Object Lock enabled audit log bucket."
+  value       = local.active_profile.audit_logs_bucket
+}
+
+output "raw_log_firehose_name" {
+  description = "Kinesis Data Firehose stream for raw logs, if used by the selected profile."
+  value       = local.active_profile.raw_log_firehose_name
+}
+
+output "preprocessor_lambda_name" {
+  description = "Lambda preprocessing function."
+  value       = local.active_profile.preprocessor_lambda_name
+}
+
+output "ecs_cluster_name" {
+  description = "ECS cluster name."
+  value       = local.active_profile.ecs_cluster_name
+}
+
+output "ecs_service_names" {
+  description = "ECS services deployed for the SOC platform."
+  value       = local.active_profile.ecs_service_names
 }
 
 output "ecr_repository_urls" {
-  description = "URLs of the generated ECR repositories"
-  value       = { for repo in aws_ecr_repository.repos : repo.name => repo.repository_url }
+  description = "ECR repository URLs keyed by service."
+  value       = local.active_profile.ecr_repository_urls
 }
 
-output "eks_oidc_provider_url" {
-  description = "EKS OpenID Connect provider URL"
-  value       = aws_iam_openid_connect_provider.eks.url
+output "rds_endpoint" {
+  description = "RDS PostgreSQL endpoint."
+  value       = local.active_profile.rds_endpoint
 }
 
-output "log_parser_iam_role_arn" {
-  description = "IAM Role ARN for EKS log-parser service account"
-  value       = aws_iam_role.log_parser_s3.arn
+output "rds_secret_arn" {
+  description = "Secrets Manager secret containing generated DB credentials."
+  value       = local.active_profile.rds_secret_arn
+}
+
+output "redis_endpoint" {
+  description = "Redis endpoint."
+  value       = local.active_profile.redis_endpoint
+}
+
+output "dynamodb_leader_lock_table" {
+  description = "DynamoDB leader lock table for HA orchestrator."
+  value       = local.active_profile.dynamodb_leader_lock_table
+}
+
+output "opensearch_vector_endpoint" {
+  description = "OpenSearch vector/search endpoint."
+  value       = local.active_profile.opensearch_vector_endpoint
+}
+
+output "step_functions_state_machine_arn" {
+  description = "SOC playbook orchestrator state machine."
+  value       = local.active_profile.step_functions_state_machine_arn
+}
+
+output "sns_alerts_topic_arn" {
+  description = "SNS topic for real-time notifications."
+  value       = local.active_profile.sns_alerts_topic_arn
+}
+
+output "cloudwatch_dashboard_name" {
+  description = "CloudWatch dashboard name."
+  value       = local.active_profile.cloudwatch_dashboard_name
+}
+
+output "github_actions_role_arn" {
+  description = "GitHub Actions deploy role ARN, if enabled."
+  value       = local.active_profile.github_actions_role_arn
+}
+
+output "cost_controls" {
+  description = "Important cost-control switches."
+  value       = local.active_profile.cost_controls
 }
