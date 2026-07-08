@@ -195,6 +195,15 @@ Apply the selected profile:
 terraform apply -var-file=environments/production/terraform.tfvars
 ```
 
+## Vector Store Runtime
+
+Local Docker/Kubernetes deployments use Qdrant for Layer 1 and Layer 2 vector context. Terraform AWS deployments use OpenSearch instead:
+
+- `hackathon`: OpenSearch Serverless vector collection, enabled in `environments/hackathon/terraform.tfvars` for full POC parity.
+- `production`: VPC OpenSearch managed domain with IAM-signed ECS task access.
+
+ECS task definitions set `VECTOR_DB_PROVIDER=opensearch`, clear `QDRANT_URL`, and pass `OPENSEARCH_ENDPOINT`, `OPENSEARCH_SERVICE`, `OPENSEARCH_L1_INDEX`, and `OPENSEARCH_L2_INDEX`. Run the vector ingestion task/script after pushing the SOAR image so `l1-threat-intel` and `l2-playbooks` are populated.
+
 ## Production Edge Options
 
 The production profile always creates a CloudFront distribution in front of the application ALB.

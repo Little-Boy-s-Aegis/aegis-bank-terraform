@@ -1611,7 +1611,12 @@ resource "aws_ecs_task_definition" "service" {
         { name = "SNS_TOPIC_ARN", value = aws_sns_topic.alerts.arn },
         { name = "RDS_ENDPOINT", value = var.enable_rds ? aws_db_instance.postgres[0].address : "" },
         { name = "REDIS_ENDPOINT", value = var.enable_redis ? aws_elasticache_cluster.redis[0].cache_nodes[0].address : "" },
-        { name = "OPENSEARCH_ENDPOINT", value = var.enable_opensearch_serverless ? aws_opensearchserverless_collection.vectors[0].collection_endpoint : "" }
+        { name = "VECTOR_DB_PROVIDER", value = var.enable_opensearch_serverless ? "opensearch" : "disabled" },
+        { name = "QDRANT_URL", value = "" },
+        { name = "OPENSEARCH_ENDPOINT", value = var.enable_opensearch_serverless ? aws_opensearchserverless_collection.vectors[0].collection_endpoint : "" },
+        { name = "OPENSEARCH_SERVICE", value = "aoss" },
+        { name = "OPENSEARCH_L1_INDEX", value = "l1-threat-intel" },
+        { name = "OPENSEARCH_L2_INDEX", value = "l2-playbooks" }
       ]
       logConfiguration = {
         logDriver = "awslogs"

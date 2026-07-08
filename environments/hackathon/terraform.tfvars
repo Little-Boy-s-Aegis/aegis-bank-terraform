@@ -5,7 +5,7 @@ deployment_profile = "hackathon"
 
 use_fargate_spot              = true
 enable_ecs_container_insights = false
-enable_opensearch_serverless  = false
+enable_opensearch_serverless  = true
 enable_github_oidc            = false
 
 ecs_cpu                    = 256

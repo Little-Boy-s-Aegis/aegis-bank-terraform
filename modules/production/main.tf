@@ -24,6 +24,7 @@ locals {
   bucket_base                = "${replace(local.name_prefix, "_", "-")}-${random_id.bucket_suffix.hex}"
   app_origin_domain_name     = var.alb_origin_domain_name != "" && var.alb_certificate_arn != "" ? var.alb_origin_domain_name : aws_lb.app.dns_name
   app_origin_protocol_policy = var.alb_origin_domain_name != "" && var.alb_certificate_arn != "" ? "https-only" : "http-only"
+  opensearch_domain_name     = substr(replace("${local.name_prefix}-vectors", "_", "-"), 0, 28)
 
   az_names = [
     coalesce(var.availability_zone, data.aws_availability_zones.available.names[0]),
@@ -922,9 +923,25 @@ resource "aws_dynamodb_table" "leader_lock" {
   }
 }
 
+data "aws_iam_policy_document" "opensearch_access" {
+  statement {
+    actions = ["es:ESHttp*"]
+
+    principals {
+      type        = "AWS"
+      identifiers = [aws_iam_role.ecs_task.arn]
+    }
+
+    resources = [
+      "arn:aws:es:${var.aws_region}:${data.aws_caller_identity.current.account_id}:domain/${local.opensearch_domain_name}/*"
+    ]
+  }
+}
+
 resource "aws_opensearch_domain" "vectors" {
-  domain_name    = substr(replace("${local.name_prefix}-vectors", "_", "-"), 0, 28)
-  engine_version = "OpenSearch_2.13"
+  domain_name     = local.opensearch_domain_name
+  engine_version  = "OpenSearch_2.13"
+  access_policies = data.aws_iam_policy_document.opensearch_access.json
 
   cluster_config {
     instance_type          = "t3.small.search"
@@ -1795,7 +1812,12 @@ resource "aws_ecs_task_definition" "app" {
         { name = "SNS_TOPIC_ARN", value = aws_sns_topic.alerts.arn },
         { name = "RDS_ENDPOINT", value = aws_db_instance.postgres.address },
         { name = "REDIS_ENDPOINT", value = aws_elasticache_replication_group.redis.primary_endpoint_address },
-        { name = "OPENSEARCH_ENDPOINT", value = aws_opensearch_domain.vectors.endpoint }
+        { name = "VECTOR_DB_PROVIDER", value = "opensearch" },
+        { name = "QDRANT_URL", value = "" },
+        { name = "OPENSEARCH_ENDPOINT", value = "https://${aws_opensearch_domain.vectors.endpoint}" },
+        { name = "OPENSEARCH_SERVICE", value = "es" },
+        { name = "OPENSEARCH_L1_INDEX", value = "l1-threat-intel" },
+        { name = "OPENSEARCH_L2_INDEX", value = "l2-playbooks" }
       ]
       logConfiguration = {
         logDriver = "awslogs"

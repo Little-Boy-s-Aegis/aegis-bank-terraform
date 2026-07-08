@@ -6,7 +6,7 @@ deployment_profile = "hackathon"
 # Cost-optimized hackathon defaults.
 use_fargate_spot              = true
 enable_ecs_container_insights = false
-enable_opensearch_serverless  = false
+enable_opensearch_serverless  = true
 enable_github_oidc            = false
 
 # Keep empty until you are ready to receive alerts.
