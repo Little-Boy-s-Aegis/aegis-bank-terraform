@@ -14,6 +14,10 @@ crash.*.log
 *.tfvars.json
 !terraform.tfvars
 !environments/*/terraform.tfvars
+!*.tfvars.example
+
+# Account-specific backend config
+backend/backend.hcl
 
 # Ignore override files
 override.tf

@@ -333,16 +333,46 @@ variable "app_certificate_arn" {
   default     = ""
 }
 
+variable "alb_certificate_arn" {
+  description = "Optional regional ACM certificate ARN for the production ALB HTTPS listener."
+  type        = string
+  default     = ""
+}
+
+variable "alb_origin_domain_name" {
+  description = "Optional DNS name that resolves to the production ALB and matches alb_certificate_arn."
+  type        = string
+  default     = ""
+}
+
 variable "route53_zone_id" {
   description = "Optional Route53 hosted zone ID used to create an alias for app_domain_name."
   type        = string
   default     = ""
 }
 
+variable "restrict_production_alb_to_cloudfront" {
+  description = "Restrict production ALB ingress to the AWS-managed CloudFront origin-facing prefix list."
+  type        = bool
+  default     = true
+}
+
 variable "enable_shield_advanced" {
   description = "Enable AWS Shield Advanced protections for production CloudFront and ALB resources. Requires an active Shield Advanced subscription."
   type        = bool
   default     = false
+}
+
+variable "bedrock_model_arns" {
+  description = "Bedrock model ARNs that production ECS tasks can invoke. Use a narrower list before production launch."
+  type        = list(string)
+  default     = ["*"]
+}
+
+variable "sagemaker_endpoint_arns" {
+  description = "SageMaker endpoint ARNs that production ECS tasks can invoke. Defaults to endpoints in this account and region."
+  type        = list(string)
+  default     = []
 }
 
 variable "alarm_alb_5xx_threshold" {

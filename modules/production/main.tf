@@ -4,6 +4,12 @@ data "aws_availability_zones" "available" {
 
 data "aws_caller_identity" "current" {}
 
+data "aws_ec2_managed_prefix_list" "cloudfront_origin_facing" {
+  count = var.restrict_alb_to_cloudfront ? 1 : 0
+
+  name = "com.amazonaws.global.cloudfront.origin-facing"
+}
+
 resource "random_id" "bucket_suffix" {
   byte_length = 4
 }
@@ -14,8 +20,10 @@ resource "random_password" "db" {
 }
 
 locals {
-  name_prefix = "${var.project_name}-${var.environment}"
-  bucket_base = "${replace(local.name_prefix, "_", "-")}-${random_id.bucket_suffix.hex}"
+  name_prefix                = "${var.project_name}-${var.environment}"
+  bucket_base                = "${replace(local.name_prefix, "_", "-")}-${random_id.bucket_suffix.hex}"
+  app_origin_domain_name     = var.alb_origin_domain_name != "" && var.alb_certificate_arn != "" ? var.alb_origin_domain_name : aws_lb.app.dns_name
+  app_origin_protocol_policy = var.alb_origin_domain_name != "" && var.alb_certificate_arn != "" ? "https-only" : "http-only"
 
   az_names = [
     coalesce(var.availability_zone, data.aws_availability_zones.available.names[0]),
@@ -422,7 +430,7 @@ resource "aws_security_group" "alb" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "alb_http" {
-  for_each = toset(var.allowed_http_cidr_blocks)
+  for_each = var.restrict_alb_to_cloudfront ? toset([]) : toset(var.allowed_http_cidr_blocks)
 
   security_group_id = aws_security_group.alb.id
   cidr_ipv4         = each.value
@@ -432,10 +440,30 @@ resource "aws_vpc_security_group_ingress_rule" "alb_http" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "alb_https" {
-  for_each = toset(var.allowed_http_cidr_blocks)
+  for_each = var.restrict_alb_to_cloudfront ? toset([]) : toset(var.allowed_http_cidr_blocks)
 
   security_group_id = aws_security_group.alb.id
   cidr_ipv4         = each.value
+  from_port         = 443
+  ip_protocol       = "tcp"
+  to_port           = 443
+}
+
+resource "aws_vpc_security_group_ingress_rule" "alb_http_from_cloudfront" {
+  count = var.restrict_alb_to_cloudfront ? 1 : 0
+
+  security_group_id = aws_security_group.alb.id
+  prefix_list_id    = data.aws_ec2_managed_prefix_list.cloudfront_origin_facing[0].id
+  from_port         = 80
+  ip_protocol       = "tcp"
+  to_port           = 80
+}
+
+resource "aws_vpc_security_group_ingress_rule" "alb_https_from_cloudfront" {
+  count = var.restrict_alb_to_cloudfront ? 1 : 0
+
+  security_group_id = aws_security_group.alb.id
+  prefix_list_id    = data.aws_ec2_managed_prefix_list.cloudfront_origin_facing[0].id
   from_port         = 443
   ip_protocol       = "tcp"
   to_port           = 443
@@ -1051,18 +1079,34 @@ resource "aws_iam_role_policy" "ecs_task" {
         ]
       },
       {
-        Sid    = "OpenSearchAndBedrock"
+        Sid    = "OpenSearchVectorStore"
         Effect = "Allow"
         Action = [
           "es:ESHttpGet",
           "es:ESHttpPost",
           "es:ESHttpPut",
-          "es:ESHttpDelete",
+          "es:ESHttpDelete"
+        ]
+        Resource = "${aws_opensearch_domain.vectors.arn}/*"
+      },
+      {
+        Sid    = "BedrockInference"
+        Effect = "Allow"
+        Action = [
           "bedrock:InvokeModel",
-          "bedrock:InvokeModelWithResponseStream",
+          "bedrock:InvokeModelWithResponseStream"
+        ]
+        Resource = var.bedrock_model_arns
+      },
+      {
+        Sid    = "SageMakerRuntime"
+        Effect = "Allow"
+        Action = [
           "sagemaker:InvokeEndpoint"
         ]
-        Resource = "*"
+        Resource = length(var.sagemaker_endpoint_arns) > 0 ? var.sagemaker_endpoint_arns : [
+          "arn:aws:sagemaker:${var.aws_region}:${data.aws_caller_identity.current.account_id}:endpoint/*"
+        ]
       },
       {
         Sid    = "SecretsAndKms"
@@ -1074,7 +1118,11 @@ resource "aws_iam_role_policy" "ecs_task" {
           "kms:GenerateDataKey",
           "kms:DescribeKey"
         ]
-        Resource = "*"
+        Resource = [
+          aws_secretsmanager_secret.db.arn,
+          aws_secretsmanager_secret.external_connectors.arn,
+          aws_kms_key.main.arn
+        ]
       },
       {
         Sid    = "ResponseActions"
@@ -1086,8 +1134,6 @@ resource "aws_iam_role_policy" "ecs_task" {
           "ec2:RevokeSecurityGroupIngress",
           "wafv2:GetIPSet",
           "wafv2:UpdateIPSet",
-          "identitystore:*",
-          "sso:*",
           "states:StartExecution"
         ]
         Resource = "*"
@@ -1239,7 +1285,14 @@ resource "aws_iam_role_policy" "step_functions" {
     Statement = [{
       Effect = "Allow"
       Action = [
-        "logs:*",
+        "logs:CreateLogDelivery",
+        "logs:GetLogDelivery",
+        "logs:UpdateLogDelivery",
+        "logs:DeleteLogDelivery",
+        "logs:ListLogDeliveries",
+        "logs:PutResourcePolicy",
+        "logs:DescribeResourcePolicies",
+        "logs:DescribeLogGroups",
         "sns:Publish",
         "sqs:SendMessage",
         "ecs:UpdateService",
@@ -1687,6 +1740,21 @@ resource "aws_lb_listener" "http" {
   }
 }
 
+resource "aws_lb_listener" "https" {
+  count = var.alb_certificate_arn != "" ? 1 : 0
+
+  load_balancer_arn = aws_lb.app.arn
+  port              = 443
+  protocol          = "HTTPS"
+  certificate_arn   = var.alb_certificate_arn
+  ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.backend.arn
+  }
+}
+
 resource "aws_ecs_task_definition" "app" {
   for_each = local.app_services
 
@@ -1897,13 +1965,13 @@ resource "aws_cloudfront_distribution" "app_edge" {
   http_version    = "http2"
 
   origin {
-    domain_name = aws_lb.app.dns_name
+    domain_name = local.app_origin_domain_name
     origin_id   = "app-alb"
 
     custom_origin_config {
       http_port              = 80
       https_port             = 443
-      origin_protocol_policy = "http-only"
+      origin_protocol_policy = local.app_origin_protocol_policy
       origin_ssl_protocols   = ["TLSv1.2"]
     }
   }
@@ -1946,7 +2014,21 @@ resource "aws_cloudfront_distribution" "app_edge" {
     Layer = "edge"
   }
 
-  depends_on = [aws_lb_listener.http]
+  depends_on = [aws_lb_listener.http, aws_lb_listener.https]
+}
+
+resource "aws_route53_record" "alb_origin_a" {
+  count = var.alb_origin_domain_name != "" && var.route53_zone_id != "" ? 1 : 0
+
+  zone_id = var.route53_zone_id
+  name    = var.alb_origin_domain_name
+  type    = "A"
+
+  alias {
+    name                   = aws_lb.app.dns_name
+    zone_id                = aws_lb.app.zone_id
+    evaluate_target_health = true
+  }
 }
 
 resource "aws_route53_record" "app_edge_a" {
@@ -2514,7 +2596,10 @@ resource "aws_config_delivery_channel" "main" {
   s3_bucket_name = aws_s3_bucket.audit.id
   s3_key_prefix  = "config"
 
-  depends_on = [aws_config_configuration_recorder.main]
+  depends_on = [
+    aws_config_configuration_recorder.main,
+    aws_s3_bucket_policy.audit_cloudtrail
+  ]
 }
 
 resource "aws_config_configuration_recorder_status" "main" {

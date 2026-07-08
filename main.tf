@@ -104,8 +104,13 @@ module "production" {
   cloudfront_price_class         = var.cloudfront_price_class
   app_domain_name                = var.app_domain_name
   app_certificate_arn            = var.app_certificate_arn
+  alb_certificate_arn            = var.alb_certificate_arn
+  alb_origin_domain_name         = var.alb_origin_domain_name
   route53_zone_id                = var.route53_zone_id
+  restrict_alb_to_cloudfront     = var.restrict_production_alb_to_cloudfront
   enable_shield_advanced         = var.enable_shield_advanced
+  bedrock_model_arns             = var.bedrock_model_arns
+  sagemaker_endpoint_arns        = var.sagemaker_endpoint_arns
   alarm_alb_5xx_threshold        = var.alarm_alb_5xx_threshold
   alarm_ecs_cpu_threshold        = var.alarm_ecs_cpu_threshold
   enable_github_oidc             = var.enable_github_oidc

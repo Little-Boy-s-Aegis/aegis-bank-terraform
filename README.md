@@ -149,6 +149,27 @@ Production is intentionally more expensive and more resilient than the hackathon
 
 ## Deploy
 
+Run the local preflight before applying:
+
+```powershell
+.\scripts\preflight.ps1 -Profile both
+```
+
+Bootstrap remote state before the first shared/team deployment:
+
+```powershell
+cd backend/bootstrap
+terraform init
+terraform apply
+```
+
+Then copy `backend/backend.tf.example` to root `backend.tf`, copy `backend/backend.hcl.example` to `backend/backend.hcl`, fill in the bootstrap outputs, and initialize the main stack:
+
+```powershell
+cd ../..
+terraform init -backend-config=backend/backend.hcl
+```
+
 Initialize once:
 
 ```bash
@@ -186,6 +207,22 @@ app_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
 route53_zone_id     = "Z1234567890"
 ```
 
+Optional HTTPS from CloudFront to ALB:
+
+```hcl
+alb_origin_domain_name = "origin.soc.example.com"
+alb_certificate_arn    = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+route53_zone_id        = "Z1234567890"
+```
+
+When `alb_origin_domain_name` and `alb_certificate_arn` are set, Terraform creates an ALB HTTPS listener, a Route53 alias for the origin name, and makes CloudFront use HTTPS to the ALB. Without those values, the stack keeps an HTTP origin path for first-time deployment.
+
+Production ALB ingress is restricted to the AWS-managed CloudFront origin-facing prefix list by default:
+
+```hcl
+restrict_production_alb_to_cloudfront = true
+```
+
 Optional Shield Advanced:
 
 ```hcl
@@ -197,6 +234,24 @@ Only enable Shield Advanced if the AWS account already has an active Shield Adva
 ## Container Images
 
 Terraform creates ECR repositories. By default, ECS task definitions point to `:latest` in those repos. Push images after `terraform apply`, or set `container_image_overrides`.
+
+For production readiness, set immutable image tags instead of relying on `:latest`:
+
+```hcl
+container_image_overrides = {
+  backend-api          = "123456789012.dkr.ecr.us-east-1.amazonaws.com/backend-api:v1.0.0"
+  layer1-auth-agent    = "123456789012.dkr.ecr.us-east-1.amazonaws.com/layer1-auth-agent:v1.0.0"
+  layer1-api-agent     = "123456789012.dkr.ecr.us-east-1.amazonaws.com/layer1-api-agent:v1.0.0"
+  layer1-infra-agent   = "123456789012.dkr.ecr.us-east-1.amazonaws.com/layer1-infra-agent:v1.0.0"
+  layer2-meta-analyzer = "123456789012.dkr.ecr.us-east-1.amazonaws.com/layer2-meta-analyzer:v1.0.0"
+  worker-service       = "123456789012.dkr.ecr.us-east-1.amazonaws.com/worker-service:v1.0.0"
+  orchestrator-active  = "123456789012.dkr.ecr.us-east-1.amazonaws.com/orchestrator-active:v1.0.0"
+  orchestrator-standby = "123456789012.dkr.ecr.us-east-1.amazonaws.com/orchestrator-standby:v1.0.0"
+  opa-policy-engine    = "123456789012.dkr.ecr.us-east-1.amazonaws.com/opa-policy-engine:v1.0.0"
+  internal-connectors  = "123456789012.dkr.ecr.us-east-1.amazonaws.com/internal-connectors:v1.0.0"
+  ssm-utilities        = "123456789012.dkr.ecr.us-east-1.amazonaws.com/ssm-utilities:v1.0.0"
+}
+```
 
 Production service keys:
 
@@ -237,3 +292,7 @@ Hackathon service keys:
 - `sns_alerts_topic_arn`
 - `cloudwatch_dashboard_name`
 - `cost_controls`
+
+## Secrets
+
+Do not put real Telegram, Slack, Jira, or ServiceNow tokens into committed tfvars files. Use a local ignored tfvars file, CI/CD secret injection, or pre-created Secrets Manager values depending on your deployment process.

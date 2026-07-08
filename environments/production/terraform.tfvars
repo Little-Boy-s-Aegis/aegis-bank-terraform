@@ -9,9 +9,15 @@ enable_opensearch_serverless  = true
 enable_github_oidc            = false
 enable_shield_advanced        = false
 
-app_domain_name     = ""
-app_certificate_arn = ""
-route53_zone_id     = ""
+app_domain_name                       = ""
+app_certificate_arn                   = ""
+alb_certificate_arn                   = ""
+alb_origin_domain_name                = ""
+route53_zone_id                       = ""
+restrict_production_alb_to_cloudfront = true
+
+bedrock_model_arns      = ["*"]
+sagemaker_endpoint_arns = []
 
 ecs_cpu                    = 512
 ecs_memory                 = 1024

@@ -1,0 +1,5 @@
+bucket         = "REPLACE_WITH_BOOTSTRAP_STATE_BUCKET"
+key            = "ai-native-soc/terraform.tfstate"
+region         = "us-east-1"
+dynamodb_table = "REPLACE_WITH_BOOTSTRAP_LOCK_TABLE"
+encrypt        = true
