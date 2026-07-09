@@ -128,7 +128,7 @@ output "layer_artifact_inventory" {
 output "vector_db_collections" {
   description = "Vector DB provider and index names used by the SOC layers."
   value = {
-    provider = "opensearch"
+    provider = local.vector_db_provider
     l1_index = local.vector_l1_index
     l2_index = local.vector_l2_index
   }

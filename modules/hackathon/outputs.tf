@@ -128,7 +128,7 @@ output "layer_artifact_inventory" {
 output "vector_db_collections" {
   description = "Vector DB provider and index names used by the SOC layers."
   value = {
-    provider = var.enable_opensearch_serverless ? "opensearch" : "disabled"
+    provider = local.vector_db_provider
     l1_index = local.vector_l1_index
     l2_index = local.vector_l2_index
   }
@@ -163,7 +163,8 @@ output "cost_controls" {
   description = "Important cost-control switches."
   value = {
     single_az_workload              = true
-    no_nat_gateway                  = true
+    no_nat_gateway                  = !var.enable_nat_gateway
+    nat_gateway_enabled             = var.enable_nat_gateway
     use_fargate_spot                = var.use_fargate_spot
     ecs_container_insights_enabled  = var.enable_ecs_container_insights
     opensearch_serverless_enabled   = var.enable_opensearch_serverless
