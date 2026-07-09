@@ -112,6 +112,11 @@ output "opensearch_vector_endpoint" {
   value       = local.active_profile.opensearch_vector_endpoint
 }
 
+output "qdrant_url" {
+  description = "Qdrant endpoint used by ECS tasks, if configured."
+  value       = local.active_profile.qdrant_url
+}
+
 output "layer_artifacts_bucket" {
   description = "S3 bucket containing canonical Layer 1 and Layer 2 artifacts uploaded by Terraform."
   value       = local.active_profile.layer_artifacts_bucket

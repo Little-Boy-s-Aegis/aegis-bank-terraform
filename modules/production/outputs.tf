@@ -105,7 +105,12 @@ output "dynamodb_leader_lock_table" {
 
 output "opensearch_vector_endpoint" {
   description = "OpenSearch vector engine endpoint."
-  value       = aws_opensearch_domain.vectors.endpoint
+  value       = local.vector_db_provider == "opensearch" ? aws_opensearch_domain.vectors.endpoint : null
+}
+
+output "qdrant_url" {
+  description = "Qdrant endpoint used by ECS tasks, if configured."
+  value       = var.qdrant_url != "" ? var.qdrant_url : null
 }
 
 output "layer_artifacts_bucket" {

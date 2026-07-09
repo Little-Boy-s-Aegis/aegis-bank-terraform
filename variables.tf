@@ -223,10 +223,75 @@ variable "llm_enabled" {
   default     = true
 }
 
+variable "llm_provider" {
+  description = "LLM provider used by ECS. Use bedrock for AWS Bedrock Qwen or dashscope for OpenAI-compatible DashScope."
+  type        = string
+  default     = "dashscope"
+
+  validation {
+    condition     = contains(["bedrock", "dashscope"], var.llm_provider)
+    error_message = "llm_provider must be either bedrock or dashscope."
+  }
+}
+
+variable "bedrock_model_id" {
+  description = "Amazon Bedrock Qwen model ID used when llm_provider is bedrock."
+  type        = string
+  default     = "qwen.qwen3-coder-next"
+}
+
+variable "bedrock_region" {
+  description = "Amazon Bedrock runtime region for Qwen. Leave null to use aws_region."
+  type        = string
+  default     = null
+}
+
+variable "bedrock_embedding_model_id" {
+  description = "Amazon Bedrock embedding model used for Qdrant vector ingestion and search."
+  type        = string
+  default     = "amazon.titan-embed-text-v2:0"
+}
+
+variable "bedrock_embedding_region" {
+  description = "Amazon Bedrock runtime region for embeddings. Leave null to use aws_region."
+  type        = string
+  default     = null
+}
+
+variable "bedrock_embedding_dimensions" {
+  description = "Embedding vector dimensions used by Qdrant/OpenSearch indexes."
+  type        = number
+  default     = 1024
+}
+
+variable "enable_qdrant" {
+  description = "Create an internal Qdrant ECS service with EFS persistence for the hackathon stack."
+  type        = bool
+  default     = false
+}
+
 variable "qdrant_url" {
-  description = "Optional existing Qdrant endpoint. When set, ECS uses VECTOR_DB_PROVIDER=qdrant instead of the AWS OpenSearch vector store."
+  description = "Optional existing Qdrant endpoint. When set, ECS uses VECTOR_DB_PROVIDER=qdrant instead of the internal Qdrant service or AWS OpenSearch vector store."
   type        = string
   default     = ""
+}
+
+variable "qdrant_image" {
+  description = "Container image used for the internal Qdrant ECS service."
+  type        = string
+  default     = "qdrant/qdrant:latest"
+}
+
+variable "qdrant_cpu" {
+  description = "Fargate task CPU units for internal Qdrant."
+  type        = number
+  default     = 256
+}
+
+variable "qdrant_memory" {
+  description = "Fargate task memory MiB for internal Qdrant."
+  type        = number
+  default     = 512
 }
 
 variable "ecr_images_to_keep" {

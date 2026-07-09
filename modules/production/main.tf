@@ -30,6 +30,8 @@ locals {
   vector_l1_index            = "l1-threat-intel"
   vector_l2_index            = "l2-playbooks"
   vector_db_provider         = var.qdrant_url != "" ? "qdrant" : "opensearch"
+  bedrock_runtime_region     = coalesce(var.bedrock_region, var.aws_region)
+  bedrock_embedding_region   = coalesce(var.bedrock_embedding_region, var.aws_region)
   layer1_artifacts_root      = abspath("${path.root}/${var.layer1_artifacts_path}")
   layer2_artifacts_root      = abspath("${path.root}/${var.layer2_artifacts_path}")
   layer1_artifact_files = toset(distinct(concat(
@@ -71,8 +73,15 @@ locals {
     { name = "OPENSEARCH_L2_INDEX", value = local.vector_l2_index }
   ]
   llm_env = [
+    { name = "LLM_PROVIDER", value = var.llm_provider },
     { name = "QWEN_MODEL_NAME", value = var.qwen_model_name },
     { name = "QWEN_BASE_URL", value = var.qwen_base_url },
+    { name = "BEDROCK_MODEL_ID", value = var.bedrock_model_id },
+    { name = "BEDROCK_REGION", value = local.bedrock_runtime_region },
+    { name = "BEDROCK_EMBEDDING_MODEL_ID", value = var.bedrock_embedding_model_id },
+    { name = "BEDROCK_EMBEDDING_REGION", value = local.bedrock_embedding_region },
+    { name = "BEDROCK_EMBEDDING_DIMENSIONS", value = tostring(var.bedrock_embedding_dimensions) },
+    { name = "VECTOR_EMBEDDING_DIMENSIONS", value = tostring(var.bedrock_embedding_dimensions) },
     { name = "LLM_ENABLED", value = tostring(var.llm_enabled) }
   ]
   llm_secret_env = var.dashscope_api_key != "" ? [

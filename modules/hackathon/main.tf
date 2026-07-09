@@ -65,7 +65,11 @@ locals {
   layer2_schema_version      = "littleboy.soc.layer2.orchestrator_decision.v8"
   vector_l1_index            = "l1-threat-intel"
   vector_l2_index            = "l2-playbooks"
-  vector_db_provider         = var.qdrant_url != "" ? "qdrant" : (var.enable_opensearch_serverless ? "opensearch" : "disabled")
+  qdrant_internal_url        = var.enable_qdrant ? "http://qdrant.${aws_service_discovery_private_dns_namespace.main[0].name}:6333" : ""
+  effective_qdrant_url       = var.qdrant_url != "" ? var.qdrant_url : local.qdrant_internal_url
+  vector_db_provider         = local.effective_qdrant_url != "" ? "qdrant" : (var.enable_opensearch_serverless ? "opensearch" : "disabled")
+  bedrock_runtime_region     = coalesce(var.bedrock_region, var.aws_region)
+  bedrock_embedding_region   = coalesce(var.bedrock_embedding_region, var.aws_region)
   layer1_artifacts_root      = abspath("${path.root}/${var.layer1_artifacts_path}")
   layer2_artifacts_root      = abspath("${path.root}/${var.layer2_artifacts_path}")
   layer1_artifact_files = toset(distinct(concat(
@@ -100,15 +104,22 @@ locals {
   ]
   vector_db_env = [
     { name = "VECTOR_DB_PROVIDER", value = local.vector_db_provider },
-    { name = "QDRANT_URL", value = var.qdrant_url },
+    { name = "QDRANT_URL", value = local.effective_qdrant_url },
     { name = "OPENSEARCH_ENDPOINT", value = local.vector_db_provider == "opensearch" ? aws_opensearchserverless_collection.vectors[0].collection_endpoint : "" },
     { name = "OPENSEARCH_SERVICE", value = "aoss" },
     { name = "OPENSEARCH_L1_INDEX", value = local.vector_l1_index },
     { name = "OPENSEARCH_L2_INDEX", value = local.vector_l2_index }
   ]
   llm_env = [
+    { name = "LLM_PROVIDER", value = var.llm_provider },
     { name = "QWEN_MODEL_NAME", value = var.qwen_model_name },
     { name = "QWEN_BASE_URL", value = var.qwen_base_url },
+    { name = "BEDROCK_MODEL_ID", value = var.bedrock_model_id },
+    { name = "BEDROCK_REGION", value = local.bedrock_runtime_region },
+    { name = "BEDROCK_EMBEDDING_MODEL_ID", value = var.bedrock_embedding_model_id },
+    { name = "BEDROCK_EMBEDDING_REGION", value = local.bedrock_embedding_region },
+    { name = "BEDROCK_EMBEDDING_DIMENSIONS", value = tostring(var.bedrock_embedding_dimensions) },
+    { name = "VECTOR_EMBEDDING_DIMENSIONS", value = tostring(var.bedrock_embedding_dimensions) },
     { name = "LLM_ENABLED", value = tostring(var.llm_enabled) }
   ]
   llm_secret_env = var.dashscope_api_key != "" ? [
@@ -524,6 +535,148 @@ resource "aws_vpc_security_group_egress_rule" "redis_all_egress" {
   security_group_id = aws_security_group.redis[0].id
   cidr_ipv4         = var.vpc_cidr
   ip_protocol       = "-1"
+}
+
+resource "aws_security_group" "qdrant" {
+  count = var.enable_qdrant ? 1 : 0
+
+  name        = "${local.name_prefix}-qdrant-sg"
+  description = "Qdrant vector DB access from ECS only"
+  vpc_id      = aws_vpc.main.id
+
+  tags = {
+    Name = "${local.name_prefix}-qdrant-sg"
+  }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "qdrant_from_ecs" {
+  count = var.enable_qdrant ? 1 : 0
+
+  security_group_id            = aws_security_group.qdrant[0].id
+  referenced_security_group_id = aws_security_group.ecs_tasks.id
+  from_port                    = 6333
+  ip_protocol                  = "tcp"
+  to_port                      = 6333
+}
+
+resource "aws_vpc_security_group_egress_rule" "qdrant_all_egress" {
+  count = var.enable_qdrant ? 1 : 0
+
+  security_group_id = aws_security_group.qdrant[0].id
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "-1"
+}
+
+resource "aws_security_group" "qdrant_efs" {
+  count = var.enable_qdrant ? 1 : 0
+
+  name        = "${local.name_prefix}-qdrant-efs-sg"
+  description = "EFS access from Qdrant ECS tasks"
+  vpc_id      = aws_vpc.main.id
+
+  tags = {
+    Name = "${local.name_prefix}-qdrant-efs-sg"
+  }
+}
+
+resource "aws_vpc_security_group_ingress_rule" "qdrant_efs_from_qdrant" {
+  count = var.enable_qdrant ? 1 : 0
+
+  security_group_id            = aws_security_group.qdrant_efs[0].id
+  referenced_security_group_id = aws_security_group.qdrant[0].id
+  from_port                    = 2049
+  ip_protocol                  = "tcp"
+  to_port                      = 2049
+}
+
+resource "aws_vpc_security_group_egress_rule" "qdrant_efs_all_egress" {
+  count = var.enable_qdrant ? 1 : 0
+
+  security_group_id = aws_security_group.qdrant_efs[0].id
+  cidr_ipv4         = var.vpc_cidr
+  ip_protocol       = "-1"
+}
+
+resource "aws_service_discovery_private_dns_namespace" "main" {
+  count = var.enable_qdrant ? 1 : 0
+
+  name = "${local.name_prefix}.local"
+  vpc  = aws_vpc.main.id
+
+  tags = {
+    Name = "${local.name_prefix}-cloudmap"
+  }
+}
+
+resource "aws_service_discovery_service" "qdrant" {
+  count = var.enable_qdrant ? 1 : 0
+
+  name = "qdrant"
+
+  dns_config {
+    namespace_id = aws_service_discovery_private_dns_namespace.main[0].id
+
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
+
+    routing_policy = "MULTIVALUE"
+  }
+
+  health_check_custom_config {
+    failure_threshold = 1
+  }
+}
+
+resource "aws_efs_file_system" "qdrant" {
+  count = var.enable_qdrant ? 1 : 0
+
+  encrypted  = true
+  kms_key_id = aws_kms_key.main.arn
+
+  lifecycle_policy {
+    transition_to_ia = "AFTER_30_DAYS"
+  }
+
+  tags = {
+    Name  = "${local.name_prefix}-qdrant-efs"
+    Layer = "vector-db"
+  }
+}
+
+resource "aws_efs_access_point" "qdrant" {
+  count = var.enable_qdrant ? 1 : 0
+
+  file_system_id = aws_efs_file_system.qdrant[0].id
+
+  posix_user {
+    gid = 1000
+    uid = 1000
+  }
+
+  root_directory {
+    path = "/qdrant"
+
+    creation_info {
+      owner_gid   = 1000
+      owner_uid   = 1000
+      permissions = "755"
+    }
+  }
+
+  tags = {
+    Name  = "${local.name_prefix}-qdrant-efs-ap"
+    Layer = "vector-db"
+  }
+}
+
+resource "aws_efs_mount_target" "qdrant" {
+  count = var.enable_qdrant ? 1 : 0
+
+  file_system_id  = aws_efs_file_system.qdrant[0].id
+  subnet_id       = aws_subnet.private_app.id
+  security_groups = [aws_security_group.qdrant_efs[0].id]
 }
 
 resource "aws_wafv2_web_acl" "alb" {
@@ -1674,6 +1827,14 @@ resource "aws_cloudwatch_log_group" "vector_db_init" {
   kms_key_id        = aws_kms_key.main.arn
 }
 
+resource "aws_cloudwatch_log_group" "qdrant" {
+  count = var.enable_qdrant ? 1 : 0
+
+  name              = "/ecs/${local.name_prefix}/qdrant"
+  retention_in_days = var.log_retention_days
+  kms_key_id        = aws_kms_key.main.arn
+}
+
 resource "aws_lb" "app" {
   name               = substr("${local.name_prefix}-alb", 0, 32)
   internal           = false
@@ -1820,6 +1981,112 @@ resource "aws_ecs_task_definition" "vector_db_init" {
 
   tags = {
     Name  = "${local.name_prefix}-vector-db-init"
+    Layer = "vector-db"
+  }
+}
+
+resource "aws_ecs_task_definition" "qdrant" {
+  count = var.enable_qdrant ? 1 : 0
+
+  family                   = "${local.name_prefix}-qdrant"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = tostring(var.qdrant_cpu)
+  memory                   = tostring(var.qdrant_memory)
+  execution_role_arn       = aws_iam_role.ecs_execution.arn
+  task_role_arn            = aws_iam_role.ecs_task.arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = var.ecs_cpu_architecture
+  }
+
+  volume {
+    name = "qdrant-storage"
+
+    efs_volume_configuration {
+      file_system_id     = aws_efs_file_system.qdrant[0].id
+      transit_encryption = "ENABLED"
+      root_directory     = "/"
+
+      authorization_config {
+        access_point_id = aws_efs_access_point.qdrant[0].id
+        iam             = "DISABLED"
+      }
+    }
+  }
+
+  container_definitions = jsonencode([
+    {
+      name      = "qdrant"
+      image     = var.qdrant_image
+      essential = true
+      portMappings = [
+        {
+          containerPort = 6333
+          hostPort      = 6333
+          protocol      = "tcp"
+        }
+      ]
+      mountPoints = [
+        {
+          sourceVolume  = "qdrant-storage"
+          containerPath = "/qdrant/storage"
+          readOnly      = false
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.qdrant[0].name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "ecs"
+        }
+      }
+    }
+  ])
+
+  tags = {
+    Name  = "${local.name_prefix}-qdrant"
+    Layer = "vector-db"
+  }
+}
+
+resource "aws_ecs_service" "qdrant" {
+  count = var.enable_qdrant ? 1 : 0
+
+  name                   = "qdrant"
+  cluster                = aws_ecs_cluster.main.id
+  task_definition        = aws_ecs_task_definition.qdrant[0].arn
+  desired_count          = 1
+  enable_execute_command = true
+  wait_for_steady_state  = false
+
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 200
+
+  capacity_provider_strategy {
+    capacity_provider = var.use_fargate_spot ? "FARGATE_SPOT" : "FARGATE"
+    weight            = 1
+  }
+
+  network_configuration {
+    subnets          = [aws_subnet.private_app.id]
+    security_groups  = [aws_security_group.qdrant[0].id]
+    assign_public_ip = false
+  }
+
+  service_registries {
+    registry_arn = aws_service_discovery_service.qdrant[0].arn
+  }
+
+  depends_on = [
+    aws_ecs_cluster_capacity_providers.main,
+    aws_efs_mount_target.qdrant
+  ]
+
+  tags = {
+    Name  = "${local.name_prefix}-qdrant"
     Layer = "vector-db"
   }
 }

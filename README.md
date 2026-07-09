@@ -199,21 +199,29 @@ terraform apply -var-file=environments/production/terraform.tfvars
 
 ECS services and the one-shot vector ingestion task receive the same Qwen runtime settings:
 
+- `LLM_PROVIDER`
 - `QWEN_MODEL_NAME`
 - `QWEN_BASE_URL`
+- `BEDROCK_MODEL_ID`
+- `BEDROCK_REGION`
+- `BEDROCK_EMBEDDING_MODEL_ID`
+- `BEDROCK_EMBEDDING_REGION`
+- `BEDROCK_EMBEDDING_DIMENSIONS`
 - `LLM_ENABLED`
 - `DASHSCOPE_API_KEY` from Secrets Manager when `dashscope_api_key` is provided
 
-Do not commit a real DashScope key. Copy `secrets.auto.tfvars.example` to `secrets.auto.tfvars`, fill `dashscope_api_key`, and optionally set `qwen_base_url` for a workspace-specific Alibaba Cloud Model Studio endpoint.
+For the hackathon profile, `llm_provider = "bedrock"` uses Qwen on Amazon Bedrock. The current profile keeps the main AWS stack in `ap-southeast-1`, and calls Qwen3 Coder Next plus Amazon Titan Text Embeddings V2 in `ap-southeast-2` because those selected Bedrock models are available there. Before apply, enable the selected Bedrock models in the AWS account if they are not already active.
+
+Do not commit a real DashScope key if using the legacy DashScope path. Copy `secrets.auto.tfvars.example` to `secrets.auto.tfvars` only for local secret overrides.
 
 ## Vector Store Runtime
 
-Local Docker/Kubernetes deployments use Qdrant for Layer 1 and Layer 2 vector context. Terraform AWS deployments default to OpenSearch for a managed VPC-native vector store:
+Local Docker/Kubernetes deployments use Qdrant for Layer 1 and Layer 2 vector context. The hackathon AWS profile also creates Qdrant by default:
 
-- `hackathon`: OpenSearch Serverless vector collection, enabled in `environments/hackathon/terraform.tfvars` for full POC parity and restricted through an OpenSearch Serverless VPC endpoint.
+- `hackathon`: private ECS Fargate Qdrant service with encrypted EFS persistence and Cloud Map DNS.
 - `production`: VPC OpenSearch managed domain with IAM-signed ECS task access.
 
-If an existing Qdrant endpoint must be used, set `qdrant_url` in an ignored tfvars file. ECS task definitions then set `VECTOR_DB_PROVIDER=qdrant` and pass `QDRANT_URL`; otherwise they set `VECTOR_DB_PROVIDER=opensearch` and pass `OPENSEARCH_ENDPOINT`, `OPENSEARCH_SERVICE`, `OPENSEARCH_L1_INDEX`, and `OPENSEARCH_L2_INDEX`. Run the vector ingestion task/script after pushing the SOAR image so `l1-threat-intel` and `l2-playbooks` are populated.
+If an existing Qdrant endpoint must be used, set `qdrant_url` in an ignored tfvars file. ECS task definitions then set `VECTOR_DB_PROVIDER=qdrant` and pass `QDRANT_URL`; otherwise the hackathon profile uses the internal Cloud Map URL. OpenSearch remains available only when Qdrant is disabled and `enable_opensearch_serverless = true`. Run the vector ingestion task/script after pushing the SOAR image so `l1-threat-intel` and `l2-playbooks` are populated.
 
 Terraform also uploads the canonical layer contracts into an encrypted S3 artifact bucket:
 
@@ -316,6 +324,7 @@ Hackathon service keys:
 - `ecr_repository_urls`
 - `rds_endpoint`
 - `redis_endpoint`
+- `qdrant_url`
 - `opensearch_vector_endpoint`
 - `step_functions_state_machine_arn`
 - `sns_alerts_topic_arn`
@@ -324,4 +333,4 @@ Hackathon service keys:
 
 ## Secrets
 
-Do not put real DashScope, Telegram, Slack, Jira, or ServiceNow tokens into committed tfvars files. Use a local ignored tfvars file, CI/CD secret injection, or pre-created Secrets Manager values depending on your deployment process.
+Do not put real DashScope, Telegram, Slack, Jira, or ServiceNow tokens into committed tfvars files. Use a local ignored tfvars file, CI/CD secret injection, or pre-created Secrets Manager values depending on your deployment process. Bedrock uses the ECS task role and does not require a committed API key.

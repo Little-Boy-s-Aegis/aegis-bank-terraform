@@ -206,6 +206,47 @@ variable "llm_enabled" {
   default     = true
 }
 
+variable "llm_provider" {
+  description = "LLM provider used by ECS. Use bedrock for AWS Bedrock Qwen or dashscope for OpenAI-compatible DashScope."
+  type        = string
+  default     = "dashscope"
+
+  validation {
+    condition     = contains(["bedrock", "dashscope"], var.llm_provider)
+    error_message = "llm_provider must be either bedrock or dashscope."
+  }
+}
+
+variable "bedrock_model_id" {
+  description = "Amazon Bedrock Qwen model ID used when llm_provider is bedrock."
+  type        = string
+  default     = "qwen.qwen3-coder-next"
+}
+
+variable "bedrock_region" {
+  description = "Amazon Bedrock runtime region for Qwen. Leave null to use aws_region."
+  type        = string
+  default     = null
+}
+
+variable "bedrock_embedding_model_id" {
+  description = "Amazon Bedrock embedding model used for vector ingestion and search."
+  type        = string
+  default     = "amazon.titan-embed-text-v2:0"
+}
+
+variable "bedrock_embedding_region" {
+  description = "Amazon Bedrock runtime region for embeddings. Leave null to use aws_region."
+  type        = string
+  default     = null
+}
+
+variable "bedrock_embedding_dimensions" {
+  description = "Embedding vector dimensions used by vector indexes."
+  type        = number
+  default     = 1024
+}
+
 variable "qdrant_url" {
   description = "Optional existing Qdrant endpoint. When set, ECS uses VECTOR_DB_PROVIDER=qdrant instead of the AWS OpenSearch vector store."
   type        = string

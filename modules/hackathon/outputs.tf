@@ -105,7 +105,12 @@ output "dynamodb_leader_lock_table" {
 
 output "opensearch_vector_endpoint" {
   description = "OpenSearch Serverless collection endpoint, if enabled."
-  value       = var.enable_opensearch_serverless ? aws_opensearchserverless_collection.vectors[0].collection_endpoint : null
+  value       = local.vector_db_provider == "opensearch" ? aws_opensearchserverless_collection.vectors[0].collection_endpoint : null
+}
+
+output "qdrant_url" {
+  description = "Qdrant endpoint used by ECS tasks, if configured."
+  value       = local.effective_qdrant_url != "" ? local.effective_qdrant_url : null
 }
 
 output "layer_artifacts_bucket" {
@@ -168,6 +173,7 @@ output "cost_controls" {
     use_fargate_spot                = var.use_fargate_spot
     ecs_container_insights_enabled  = var.enable_ecs_container_insights
     opensearch_serverless_enabled   = var.enable_opensearch_serverless
+    qdrant_enabled                  = local.vector_db_provider == "qdrant"
     interface_vpc_endpoints_enabled = var.enable_interface_endpoints
     audit_object_lock_days          = var.audit_retention_days
   }

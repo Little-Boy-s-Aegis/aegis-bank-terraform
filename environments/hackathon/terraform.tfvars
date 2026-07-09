@@ -5,7 +5,8 @@ deployment_profile = "hackathon"
 
 use_fargate_spot              = true
 enable_ecs_container_insights = false
-enable_opensearch_serverless  = true
+enable_opensearch_serverless  = false
+enable_qdrant                 = true
 enable_nat_gateway            = true
 enable_github_oidc            = false
 
@@ -21,7 +22,11 @@ log_retention_days    = 14
 allowed_http_cidr_blocks = ["42.117.110.32/32"]
 sns_email_subscriptions  = ["voduchieu42@gmail.com"]
 
-# Store dashscope_api_key in an ignored tfvars file or pass it via CLI/CI.
-qwen_model_name = "qwen3-coder-next"
+llm_provider                 = "bedrock"
+bedrock_model_id             = "qwen.qwen3-coder-next"
+bedrock_region               = "ap-southeast-2"
+bedrock_embedding_model_id   = "amazon.titan-embed-text-v2:0"
+bedrock_embedding_region     = "ap-southeast-2"
+bedrock_embedding_dimensions = 1024
 
 container_image_overrides = {}
