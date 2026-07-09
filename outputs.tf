@@ -112,6 +112,26 @@ output "opensearch_vector_endpoint" {
   value       = local.active_profile.opensearch_vector_endpoint
 }
 
+output "layer_artifacts_bucket" {
+  description = "S3 bucket containing canonical Layer 1 and Layer 2 artifacts uploaded by Terraform."
+  value       = local.active_profile.layer_artifacts_bucket
+}
+
+output "layer_artifact_inventory" {
+  description = "Canonical Layer 1 and Layer 2 artifacts synchronized by Terraform."
+  value       = local.active_profile.layer_artifact_inventory
+}
+
+output "vector_db_collections" {
+  description = "Vector DB provider and collection/index names used by Layer 1 and Layer 2 context retrieval."
+  value       = local.active_profile.vector_db_collections
+}
+
+output "vector_db_init_task_definition_arn" {
+  description = "On-demand ECS task definition that ingests Layer 1/Layer 2 artifacts into the vector DB."
+  value       = local.active_profile.vector_db_init_task_definition_arn
+}
+
 output "step_functions_state_machine_arn" {
   description = "SOC playbook orchestrator state machine."
   value       = local.active_profile.step_functions_state_machine_arn

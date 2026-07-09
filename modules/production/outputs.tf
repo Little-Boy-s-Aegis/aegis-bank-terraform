@@ -108,6 +108,37 @@ output "opensearch_vector_endpoint" {
   value       = aws_opensearch_domain.vectors.endpoint
 }
 
+output "layer_artifacts_bucket" {
+  description = "S3 bucket containing canonical Layer 1 and Layer 2 artifacts uploaded by Terraform."
+  value       = aws_s3_bucket.layer_artifacts.id
+}
+
+output "layer_artifact_inventory" {
+  description = "Layer artifacts synchronized into S3 for ECS runtime and vector ingestion."
+  value = {
+    layer1_schema_version = local.layer1_schema_version
+    layer2_schema_version = local.layer2_schema_version
+    layer1_files          = sort(tolist(local.layer1_artifact_files))
+    layer2_files          = sort(tolist(local.layer2_artifact_files))
+    layer1_s3_prefix      = "s3://${aws_s3_bucket.layer_artifacts.id}/layer1/"
+    layer2_s3_prefix      = "s3://${aws_s3_bucket.layer_artifacts.id}/layer2/"
+  }
+}
+
+output "vector_db_collections" {
+  description = "Vector DB provider and index names used by the SOC layers."
+  value = {
+    provider = "opensearch"
+    l1_index = local.vector_l1_index
+    l2_index = local.vector_l2_index
+  }
+}
+
+output "vector_db_init_task_definition_arn" {
+  description = "On-demand ECS task definition that ingests Layer 1/Layer 2 artifacts into the vector DB."
+  value       = aws_ecs_task_definition.vector_db_init.arn
+}
+
 output "step_functions_state_machine_arn" {
   description = "SOC playbook orchestrator state machine."
   value       = aws_sfn_state_machine.orchestrator.arn

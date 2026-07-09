@@ -204,6 +204,15 @@ Local Docker/Kubernetes deployments use Qdrant for Layer 1 and Layer 2 vector co
 
 ECS task definitions set `VECTOR_DB_PROVIDER=opensearch`, clear `QDRANT_URL`, and pass `OPENSEARCH_ENDPOINT`, `OPENSEARCH_SERVICE`, `OPENSEARCH_L1_INDEX`, and `OPENSEARCH_L2_INDEX`. Run the vector ingestion task/script after pushing the SOAR image so `l1-threat-intel` and `l2-playbooks` are populated.
 
+Terraform also uploads the canonical layer contracts into an encrypted S3 artifact bucket:
+
+- Layer 1: `agent_*/layer1_standard_agent_output_schema.json`, agent prompts, attack/CAPEC references, edge-case matrices, and surface context matrices.
+- Layer 2: `layer2_orchestrator_output_schema.json`, `layer2_json_output_example.json`, `layer2_orchestrator_output_example.json`, `orchestrator_l2_playbooks.md`, risk scoring tables, and `mitre_attack_full.json`.
+
+The ECS services receive `LAYER_ARTIFACTS_S3_BUCKET`, `LAYER1_ARTIFACTS_S3_PREFIX`, `LAYER2_ARTIFACTS_S3_PREFIX`, `AGENT_L1_DIR`, and `AGENT_L2_DIR`; SOAR startup and vector ingestion sync those S3 prefixes into `/tmp/aegis-layer-artifacts`. Terraform outputs `layer_artifacts_bucket`, `layer_artifact_inventory`, `vector_db_collections`, and `vector_db_init_task_definition_arn` so the deployment can verify exactly what was synchronized.
+
+After pushing the SOAR image, run the output `vector_db_init_task_definition_arn` as a one-shot ECS task in the private app subnet/security group. It ingests Layer 1 references into `l1-threat-intel` and Layer 2 playbooks/POC guidance into `l2-playbooks`.
+
 ## Production Edge Options
 
 The production profile always creates a CloudFront distribution in front of the application ALB.

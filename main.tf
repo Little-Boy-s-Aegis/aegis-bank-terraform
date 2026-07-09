@@ -30,6 +30,8 @@ module "hackathon" {
   use_fargate_spot               = var.use_fargate_spot
   enable_ecs_container_insights  = var.enable_ecs_container_insights
   container_image_overrides      = var.container_image_overrides
+  layer1_artifacts_path          = var.layer1_artifacts_path
+  layer2_artifacts_path          = var.layer2_artifacts_path
   ecr_images_to_keep             = var.ecr_images_to_keep
   enable_rds                     = var.enable_rds
   db_name                        = var.db_name
@@ -83,6 +85,8 @@ module "production" {
   use_fargate_spot               = var.use_fargate_spot
   enable_ecs_container_insights  = var.enable_ecs_container_insights
   container_image_overrides      = var.container_image_overrides
+  layer1_artifacts_path          = var.layer1_artifacts_path
+  layer2_artifacts_path          = var.layer2_artifacts_path
   ecr_images_to_keep             = var.ecr_images_to_keep
   db_name                        = var.db_name
   db_username                    = var.db_username

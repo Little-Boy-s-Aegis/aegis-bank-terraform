@@ -61,6 +61,50 @@ locals {
   }
 
   opensearch_collection_name = substr(replace(lower(local.name_prefix), "_", "-"), 0, 23)
+  layer1_schema_version      = "littleboy.soc.layer1.agent_finding.v4"
+  layer2_schema_version      = "littleboy.soc.layer2.orchestrator_decision.v8"
+  vector_l1_index            = "l1-threat-intel"
+  vector_l2_index            = "l2-playbooks"
+  layer1_artifacts_root      = abspath("${path.root}/${var.layer1_artifacts_path}")
+  layer2_artifacts_root      = abspath("${path.root}/${var.layer2_artifacts_path}")
+  layer1_artifact_files = toset(distinct(concat(
+    tolist(fileset(local.layer1_artifacts_root, "README.md")),
+    tolist(fileset(local.layer1_artifacts_root, "agent_*/README.md")),
+    tolist(fileset(local.layer1_artifacts_root, "agent_*/layer1_standard_agent_output_schema.json")),
+    tolist(fileset(local.layer1_artifacts_root, "agent_*/*_system_prompt.md")),
+    tolist(fileset(local.layer1_artifacts_root, "agent_*/*_reference.md")),
+    tolist(fileset(local.layer1_artifacts_root, "agent_*/*_matrix.md"))
+  )))
+  layer2_artifact_files = toset(distinct(concat(
+    tolist(fileset(local.layer2_artifacts_root, "*.md")),
+    tolist(fileset(local.layer2_artifacts_root, "*.json")),
+    tolist(fileset(local.layer2_artifacts_root, "risk_scoring/*.md"))
+  )))
+  layer_artifact_env = [
+    { name = "LAYER1_SCHEMA_VERSION", value = local.layer1_schema_version },
+    { name = "LAYER2_SCHEMA_VERSION", value = local.layer2_schema_version },
+    { name = "LAYER_ARTIFACTS_LOCAL_DIR", value = "/tmp/aegis-layer-artifacts" },
+    { name = "AGENT_L1_DIR", value = "/tmp/aegis-layer-artifacts/layer1" },
+    { name = "AGENT_L2_DIR", value = "/tmp/aegis-layer-artifacts/layer2" },
+    { name = "LAYER_ARTIFACTS_S3_BUCKET", value = aws_s3_bucket.layer_artifacts.id },
+    { name = "LAYER1_ARTIFACTS_S3_PREFIX", value = "layer1/" },
+    { name = "LAYER2_ARTIFACTS_S3_PREFIX", value = "layer2/" },
+    { name = "LAYER1_ARTIFACTS_URI", value = "s3://${aws_s3_bucket.layer_artifacts.id}/layer1/" },
+    { name = "LAYER2_ARTIFACTS_URI", value = "s3://${aws_s3_bucket.layer_artifacts.id}/layer2/" },
+    { name = "LAYER1_OUTPUT_SCHEMA_GLOB", value = "s3://${aws_s3_bucket.layer_artifacts.id}/layer1/agent_*/layer1_standard_agent_output_schema.json" },
+    { name = "LAYER2_OUTPUT_SCHEMA_URI", value = "s3://${aws_s3_bucket.layer_artifacts.id}/layer2/layer2_orchestrator_output_schema.json" },
+    { name = "LAYER2_OUTPUT_EXAMPLE_URI", value = "s3://${aws_s3_bucket.layer_artifacts.id}/layer2/layer2_json_output_example.json" },
+    { name = "LAYER2_PLAYBOOKS_URI", value = "s3://${aws_s3_bucket.layer_artifacts.id}/layer2/orchestrator_l2_playbooks.md" },
+    { name = "MITRE_ATTACK_FULL_URI", value = "s3://${aws_s3_bucket.layer_artifacts.id}/layer2/mitre_attack_full.json" }
+  ]
+  vector_db_env = [
+    { name = "VECTOR_DB_PROVIDER", value = var.enable_opensearch_serverless ? "opensearch" : "disabled" },
+    { name = "QDRANT_URL", value = "" },
+    { name = "OPENSEARCH_ENDPOINT", value = var.enable_opensearch_serverless ? aws_opensearchserverless_collection.vectors[0].collection_endpoint : "" },
+    { name = "OPENSEARCH_SERVICE", value = "aoss" },
+    { name = "OPENSEARCH_L1_INDEX", value = local.vector_l1_index },
+    { name = "OPENSEARCH_L2_INDEX", value = local.vector_l2_index }
+  ]
 }
 
 resource "aws_vpc" "main" {
@@ -539,6 +583,16 @@ resource "aws_s3_bucket" "dashboard" {
   }
 }
 
+resource "aws_s3_bucket" "layer_artifacts" {
+  bucket        = "${local.bucket_base}-layer-artifacts"
+  force_destroy = var.force_destroy_buckets
+
+  tags = {
+    Name  = "${local.name_prefix}-layer-artifacts"
+    Layer = "layer-contracts"
+  }
+}
+
 resource "aws_s3_bucket" "audit" {
   bucket              = "${local.bucket_base}-audit-logs"
   force_destroy       = var.force_destroy_buckets
@@ -552,9 +606,10 @@ resource "aws_s3_bucket" "audit" {
 
 resource "aws_s3_bucket_versioning" "versioned" {
   for_each = {
-    raw       = aws_s3_bucket.raw_logs.id
-    processed = aws_s3_bucket.processed_logs.id
-    audit     = aws_s3_bucket.audit.id
+    raw             = aws_s3_bucket.raw_logs.id
+    processed       = aws_s3_bucket.processed_logs.id
+    layer_artifacts = aws_s3_bucket.layer_artifacts.id
+    audit           = aws_s3_bucket.audit.id
   }
 
   bucket = each.value
@@ -578,9 +633,10 @@ resource "aws_s3_bucket_object_lock_configuration" "audit" {
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "kms_encrypted" {
   for_each = {
-    raw       = aws_s3_bucket.raw_logs.id
-    processed = aws_s3_bucket.processed_logs.id
-    audit     = aws_s3_bucket.audit.id
+    raw             = aws_s3_bucket.raw_logs.id
+    processed       = aws_s3_bucket.processed_logs.id
+    layer_artifacts = aws_s3_bucket.layer_artifacts.id
+    audit           = aws_s3_bucket.audit.id
   }
 
   bucket = each.value
@@ -605,10 +661,11 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "dashboard" {
 
 resource "aws_s3_bucket_public_access_block" "all" {
   for_each = {
-    raw       = aws_s3_bucket.raw_logs.id
-    processed = aws_s3_bucket.processed_logs.id
-    dashboard = aws_s3_bucket.dashboard.id
-    audit     = aws_s3_bucket.audit.id
+    raw             = aws_s3_bucket.raw_logs.id
+    processed       = aws_s3_bucket.processed_logs.id
+    dashboard       = aws_s3_bucket.dashboard.id
+    layer_artifacts = aws_s3_bucket.layer_artifacts.id
+    audit           = aws_s3_bucket.audit.id
   }
 
   bucket                  = each.value
@@ -665,6 +722,40 @@ resource "aws_s3_object" "dashboard_placeholder" {
       </body>
     </html>
   HTML
+}
+
+resource "aws_s3_object" "layer1_artifacts" {
+  for_each = local.layer1_artifact_files
+
+  bucket                 = aws_s3_bucket.layer_artifacts.id
+  key                    = "layer1/${each.value}"
+  source                 = "${local.layer1_artifacts_root}/${each.value}"
+  etag                   = filemd5("${local.layer1_artifacts_root}/${each.value}")
+  content_type           = endswith(each.value, ".json") ? "application/json" : "text/markdown"
+  server_side_encryption = "aws:kms"
+  kms_key_id             = aws_kms_key.main.arn
+
+  tags = {
+    Layer         = "layer1"
+    SchemaVersion = local.layer1_schema_version
+  }
+}
+
+resource "aws_s3_object" "layer2_artifacts" {
+  for_each = local.layer2_artifact_files
+
+  bucket                 = aws_s3_bucket.layer_artifacts.id
+  key                    = "layer2/${each.value}"
+  source                 = "${local.layer2_artifacts_root}/${each.value}"
+  etag                   = filemd5("${local.layer2_artifacts_root}/${each.value}")
+  content_type           = endswith(each.value, ".json") ? "application/json" : "text/markdown"
+  server_side_encryption = "aws:kms"
+  kms_key_id             = aws_kms_key.main.arn
+
+  tags = {
+    Layer         = "layer2"
+    SchemaVersion = local.layer2_schema_version
+  }
 }
 
 resource "aws_secretsmanager_secret" "db" {
@@ -1144,6 +1235,8 @@ resource "aws_iam_role_policy" "ecs_task" {
           "${aws_s3_bucket.raw_logs.arn}/*",
           aws_s3_bucket.processed_logs.arn,
           "${aws_s3_bucket.processed_logs.arn}/*",
+          aws_s3_bucket.layer_artifacts.arn,
+          "${aws_s3_bucket.layer_artifacts.arn}/*",
           aws_s3_bucket.audit.arn,
           "${aws_s3_bucket.audit.arn}/*"
         ]
@@ -1523,6 +1616,12 @@ resource "aws_cloudwatch_log_group" "ecs" {
   kms_key_id        = aws_kms_key.main.arn
 }
 
+resource "aws_cloudwatch_log_group" "vector_db_init" {
+  name              = "/ecs/${local.name_prefix}/vector-db-init"
+  retention_in_days = var.log_retention_days
+  kms_key_id        = aws_kms_key.main.arn
+}
+
 resource "aws_lb" "app" {
   name               = substr("${local.name_prefix}-alb", 0, 32)
   internal           = false
@@ -1599,7 +1698,7 @@ resource "aws_ecs_task_definition" "service" {
           protocol      = "tcp"
         }
       ]
-      environment = [
+      environment = concat([
         { name = "APP_NAME", value = each.key },
         { name = "AWS_REGION", value = var.aws_region },
         { name = "RAW_LOG_BUCKET", value = aws_s3_bucket.raw_logs.id },
@@ -1610,14 +1709,8 @@ resource "aws_ecs_task_definition" "service" {
         { name = "ACTION_QUEUE_URL", value = aws_sqs_queue.action_events.url },
         { name = "SNS_TOPIC_ARN", value = aws_sns_topic.alerts.arn },
         { name = "RDS_ENDPOINT", value = var.enable_rds ? aws_db_instance.postgres[0].address : "" },
-        { name = "REDIS_ENDPOINT", value = var.enable_redis ? aws_elasticache_cluster.redis[0].cache_nodes[0].address : "" },
-        { name = "VECTOR_DB_PROVIDER", value = var.enable_opensearch_serverless ? "opensearch" : "disabled" },
-        { name = "QDRANT_URL", value = "" },
-        { name = "OPENSEARCH_ENDPOINT", value = var.enable_opensearch_serverless ? aws_opensearchserverless_collection.vectors[0].collection_endpoint : "" },
-        { name = "OPENSEARCH_SERVICE", value = "aoss" },
-        { name = "OPENSEARCH_L1_INDEX", value = "l1-threat-intel" },
-        { name = "OPENSEARCH_L2_INDEX", value = "l2-playbooks" }
-      ]
+        { name = "REDIS_ENDPOINT", value = var.enable_redis ? aws_elasticache_cluster.redis[0].cache_nodes[0].address : "" }
+      ], local.layer_artifact_env, local.vector_db_env)
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -1632,6 +1725,48 @@ resource "aws_ecs_task_definition" "service" {
   tags = {
     Name  = "${local.name_prefix}-${each.key}"
     Layer = "compute"
+  }
+}
+
+resource "aws_ecs_task_definition" "vector_db_init" {
+  family                   = "${local.name_prefix}-vector-db-init"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = tostring(var.ecs_cpu)
+  memory                   = tostring(var.ecs_memory)
+  execution_role_arn       = aws_iam_role.ecs_execution.arn
+  task_role_arn            = aws_iam_role.ecs_task.arn
+
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = var.ecs_cpu_architecture
+  }
+
+  container_definitions = jsonencode([
+    {
+      name       = "vector-db-init"
+      image      = lookup(var.container_image_overrides, "orchestrator-ha", "${aws_ecr_repository.service["orchestrator-ha"].repository_url}:latest")
+      essential  = true
+      entryPoint = ["python"]
+      command    = ["ingest_to_vector_db.py"]
+      environment = concat([
+        { name = "APP_NAME", value = "vector-db-init" },
+        { name = "AWS_REGION", value = var.aws_region }
+      ], local.layer_artifact_env, local.vector_db_env)
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.vector_db_init.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "ecs"
+        }
+      }
+    }
+  ])
+
+  tags = {
+    Name  = "${local.name_prefix}-vector-db-init"
+    Layer = "vector-db"
   }
 }
 

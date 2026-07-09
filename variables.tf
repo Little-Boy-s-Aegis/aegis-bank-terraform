@@ -180,6 +180,18 @@ variable "container_image_overrides" {
   default     = {}
 }
 
+variable "layer1_artifacts_path" {
+  description = "Path, relative to the Terraform root, containing canonical Layer 1 prompts, references, and output schemas."
+  type        = string
+  default     = "../agent-layer-1"
+}
+
+variable "layer2_artifacts_path" {
+  description = "Path, relative to the Terraform root, containing canonical Layer 2 prompt, output JSON/schema, risk tables, MITRE KB, and playbooks."
+  type        = string
+  default     = "../agent-layer-2"
+}
+
 variable "ecr_images_to_keep" {
   description = "Number of images to retain per ECR repository."
   type        = number
