@@ -29,6 +29,7 @@ locals {
   layer2_schema_version      = "littleboy.soc.layer2.orchestrator_decision.v8"
   vector_l1_index            = "l1-threat-intel"
   vector_l2_index            = "l2-playbooks"
+  vector_db_provider         = var.qdrant_url != "" ? "qdrant" : "opensearch"
   layer1_artifacts_root      = abspath("${path.root}/${var.layer1_artifacts_path}")
   layer2_artifacts_root      = abspath("${path.root}/${var.layer2_artifacts_path}")
   layer1_artifact_files = toset(distinct(concat(
@@ -62,13 +63,21 @@ locals {
     { name = "MITRE_ATTACK_FULL_URI", value = "s3://${aws_s3_bucket.layer_artifacts.id}/layer2/mitre_attack_full.json" }
   ]
   vector_db_env = [
-    { name = "VECTOR_DB_PROVIDER", value = "opensearch" },
-    { name = "QDRANT_URL", value = "" },
-    { name = "OPENSEARCH_ENDPOINT", value = "https://${aws_opensearch_domain.vectors.endpoint}" },
+    { name = "VECTOR_DB_PROVIDER", value = local.vector_db_provider },
+    { name = "QDRANT_URL", value = var.qdrant_url },
+    { name = "OPENSEARCH_ENDPOINT", value = local.vector_db_provider == "opensearch" ? "https://${aws_opensearch_domain.vectors.endpoint}" : "" },
     { name = "OPENSEARCH_SERVICE", value = "es" },
     { name = "OPENSEARCH_L1_INDEX", value = local.vector_l1_index },
     { name = "OPENSEARCH_L2_INDEX", value = local.vector_l2_index }
   ]
+  llm_env = [
+    { name = "QWEN_MODEL_NAME", value = var.qwen_model_name },
+    { name = "QWEN_BASE_URL", value = var.qwen_base_url },
+    { name = "LLM_ENABLED", value = tostring(var.llm_enabled) }
+  ]
+  llm_secret_env = var.dashscope_api_key != "" ? [
+    { name = "DASHSCOPE_API_KEY", valueFrom = aws_secretsmanager_secret.llm[0].arn }
+  ] : []
 
   az_names = [
     coalesce(var.availability_zone, data.aws_availability_zones.available.names[0]),
@@ -1228,11 +1237,11 @@ resource "aws_iam_role_policy" "ecs_task" {
           "kms:GenerateDataKey",
           "kms:DescribeKey"
         ]
-        Resource = [
+        Resource = concat([
           aws_secretsmanager_secret.db.arn,
           aws_secretsmanager_secret.external_connectors.arn,
           aws_kms_key.main.arn
-        ]
+        ], var.dashscope_api_key != "" ? [aws_secretsmanager_secret.llm[0].arn] : [])
       },
       {
         Sid    = "ResponseActions"
@@ -1911,7 +1920,8 @@ resource "aws_ecs_task_definition" "app" {
         { name = "SNS_TOPIC_ARN", value = aws_sns_topic.alerts.arn },
         { name = "RDS_ENDPOINT", value = aws_db_instance.postgres.address },
         { name = "REDIS_ENDPOINT", value = aws_elasticache_replication_group.redis.primary_endpoint_address }
-      ], local.layer_artifact_env, local.vector_db_env)
+      ], local.layer_artifact_env, local.vector_db_env, local.llm_env)
+      secrets = local.llm_secret_env
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -2002,7 +2012,8 @@ resource "aws_ecs_task_definition" "vector_db_init" {
       environment = concat([
         { name = "APP_NAME", value = "vector-db-init" },
         { name = "AWS_REGION", value = var.aws_region }
-      ], local.layer_artifact_env, local.vector_db_env)
+      ], local.layer_artifact_env, local.vector_db_env, local.llm_env)
+      secrets = local.llm_secret_env
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -2259,6 +2270,21 @@ resource "aws_ses_email_identity" "notification_sender" {
   count = var.ses_identity_email == null ? 0 : 1
 
   email = var.ses_identity_email
+}
+
+resource "aws_secretsmanager_secret" "llm" {
+  count = var.dashscope_api_key != "" ? 1 : 0
+
+  name        = "${local.name_prefix}/production/llm/dashscope"
+  description = "DashScope API key for Qwen LLM runtime"
+  kms_key_id  = aws_kms_key.main.arn
+}
+
+resource "aws_secretsmanager_secret_version" "llm" {
+  count = var.dashscope_api_key != "" ? 1 : 0
+
+  secret_id     = aws_secretsmanager_secret.llm[0].id
+  secret_string = var.dashscope_api_key
 }
 
 resource "aws_secretsmanager_secret" "external_connectors" {

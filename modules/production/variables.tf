@@ -181,6 +181,37 @@ variable "layer2_artifacts_path" {
   default     = "../agent-layer-2"
 }
 
+variable "dashscope_api_key" {
+  description = "Optional DashScope API key for Qwen, stored in Secrets Manager and injected into ECS as DASHSCOPE_API_KEY."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "qwen_model_name" {
+  description = "Qwen model ID exposed to ECS as QWEN_MODEL_NAME."
+  type        = string
+  default     = "qwen3-plus"
+}
+
+variable "qwen_base_url" {
+  description = "OpenAI-compatible DashScope/Qwen base URL exposed to ECS as QWEN_BASE_URL."
+  type        = string
+  default     = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+}
+
+variable "llm_enabled" {
+  description = "Expose whether LLM calls are enabled to ECS as LLM_ENABLED."
+  type        = bool
+  default     = true
+}
+
+variable "qdrant_url" {
+  description = "Optional existing Qdrant endpoint. When set, ECS uses VECTOR_DB_PROVIDER=qdrant instead of the AWS OpenSearch vector store."
+  type        = string
+  default     = ""
+}
+
 variable "ecr_images_to_keep" {
   description = "Number of images to retain per ECR repository."
   type        = number

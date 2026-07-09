@@ -81,6 +81,12 @@ variable "enable_interface_endpoints" {
   default     = true
 }
 
+variable "enable_nat_gateway" {
+  description = "Create a NAT Gateway so private ECS tasks can call external services such as DashScope/Qdrant."
+  type        = bool
+  default     = false
+}
+
 variable "interface_endpoint_services" {
   description = "Interface endpoint service suffixes. Remove bedrock-runtime if the region does not support it."
   type        = list(string)
@@ -190,6 +196,37 @@ variable "layer2_artifacts_path" {
   description = "Path, relative to the Terraform root, containing canonical Layer 2 prompt, output JSON/schema, risk tables, MITRE KB, and playbooks."
   type        = string
   default     = "../agent-layer-2"
+}
+
+variable "dashscope_api_key" {
+  description = "Optional DashScope API key for Qwen, stored in Secrets Manager and injected into ECS as DASHSCOPE_API_KEY."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "qwen_model_name" {
+  description = "Qwen model ID exposed to ECS as QWEN_MODEL_NAME."
+  type        = string
+  default     = "qwen3-plus"
+}
+
+variable "qwen_base_url" {
+  description = "OpenAI-compatible DashScope/Qwen base URL exposed to ECS as QWEN_BASE_URL."
+  type        = string
+  default     = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+}
+
+variable "llm_enabled" {
+  description = "Expose whether LLM calls are enabled to ECS as LLM_ENABLED."
+  type        = bool
+  default     = true
+}
+
+variable "qdrant_url" {
+  description = "Optional existing Qdrant endpoint. When set, ECS uses VECTOR_DB_PROVIDER=qdrant instead of the AWS OpenSearch vector store."
+  type        = string
+  default     = ""
 }
 
 variable "ecr_images_to_keep" {

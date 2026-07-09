@@ -15,6 +15,7 @@ module "hackathon" {
   data_spare_subnet_cidr         = var.data_spare_subnet_cidr
   allowed_http_cidr_blocks       = var.allowed_http_cidr_blocks
   enable_interface_endpoints     = var.enable_interface_endpoints
+  enable_nat_gateway             = var.enable_nat_gateway
   interface_endpoint_services    = var.interface_endpoint_services
   force_destroy_buckets          = var.force_destroy_buckets
   s3_transition_to_ia_days       = var.s3_transition_to_ia_days
@@ -32,6 +33,11 @@ module "hackathon" {
   container_image_overrides      = var.container_image_overrides
   layer1_artifacts_path          = var.layer1_artifacts_path
   layer2_artifacts_path          = var.layer2_artifacts_path
+  dashscope_api_key              = var.dashscope_api_key
+  qwen_model_name                = var.qwen_model_name
+  qwen_base_url                  = var.qwen_base_url
+  llm_enabled                    = var.llm_enabled
+  qdrant_url                     = var.qdrant_url
   ecr_images_to_keep             = var.ecr_images_to_keep
   enable_rds                     = var.enable_rds
   db_name                        = var.db_name
@@ -87,6 +93,11 @@ module "production" {
   container_image_overrides      = var.container_image_overrides
   layer1_artifacts_path          = var.layer1_artifacts_path
   layer2_artifacts_path          = var.layer2_artifacts_path
+  dashscope_api_key              = var.dashscope_api_key
+  qwen_model_name                = var.qwen_model_name
+  qwen_base_url                  = var.qwen_base_url
+  llm_enabled                    = var.llm_enabled
+  qdrant_url                     = var.qdrant_url
   ecr_images_to_keep             = var.ecr_images_to_keep
   db_name                        = var.db_name
   db_username                    = var.db_username

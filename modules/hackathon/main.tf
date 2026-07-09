@@ -65,6 +65,7 @@ locals {
   layer2_schema_version      = "littleboy.soc.layer2.orchestrator_decision.v8"
   vector_l1_index            = "l1-threat-intel"
   vector_l2_index            = "l2-playbooks"
+  vector_db_provider         = var.qdrant_url != "" ? "qdrant" : (var.enable_opensearch_serverless ? "opensearch" : "disabled")
   layer1_artifacts_root      = abspath("${path.root}/${var.layer1_artifacts_path}")
   layer2_artifacts_root      = abspath("${path.root}/${var.layer2_artifacts_path}")
   layer1_artifact_files = toset(distinct(concat(
@@ -98,13 +99,21 @@ locals {
     { name = "MITRE_ATTACK_FULL_URI", value = "s3://${aws_s3_bucket.layer_artifacts.id}/layer2/mitre_attack_full.json" }
   ]
   vector_db_env = [
-    { name = "VECTOR_DB_PROVIDER", value = var.enable_opensearch_serverless ? "opensearch" : "disabled" },
-    { name = "QDRANT_URL", value = "" },
-    { name = "OPENSEARCH_ENDPOINT", value = var.enable_opensearch_serverless ? aws_opensearchserverless_collection.vectors[0].collection_endpoint : "" },
+    { name = "VECTOR_DB_PROVIDER", value = local.vector_db_provider },
+    { name = "QDRANT_URL", value = var.qdrant_url },
+    { name = "OPENSEARCH_ENDPOINT", value = local.vector_db_provider == "opensearch" ? aws_opensearchserverless_collection.vectors[0].collection_endpoint : "" },
     { name = "OPENSEARCH_SERVICE", value = "aoss" },
     { name = "OPENSEARCH_L1_INDEX", value = local.vector_l1_index },
     { name = "OPENSEARCH_L2_INDEX", value = local.vector_l2_index }
   ]
+  llm_env = [
+    { name = "QWEN_MODEL_NAME", value = var.qwen_model_name },
+    { name = "QWEN_BASE_URL", value = var.qwen_base_url },
+    { name = "LLM_ENABLED", value = tostring(var.llm_enabled) }
+  ]
+  llm_secret_env = var.dashscope_api_key != "" ? [
+    { name = "DASHSCOPE_API_KEY", valueFrom = aws_secretsmanager_secret.llm[0].arn }
+  ] : []
 }
 
 resource "aws_vpc" "main" {
@@ -210,12 +219,45 @@ resource "aws_route_table_association" "public_alb_spare" {
   route_table_id = aws_route_table.public.id
 }
 
+resource "aws_eip" "nat" {
+  count = var.enable_nat_gateway ? 1 : 0
+
+  domain = "vpc"
+
+  depends_on = [aws_internet_gateway.main]
+
+  tags = {
+    Name = "${local.name_prefix}-nat-eip"
+  }
+}
+
+resource "aws_nat_gateway" "main" {
+  count = var.enable_nat_gateway ? 1 : 0
+
+  allocation_id = aws_eip.nat[0].id
+  subnet_id     = aws_subnet.public.id
+
+  depends_on = [aws_internet_gateway.main]
+
+  tags = {
+    Name = "${local.name_prefix}-nat"
+  }
+}
+
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
 
   tags = {
-    Name = "${local.name_prefix}-private-rt-no-nat"
+    Name = var.enable_nat_gateway ? "${local.name_prefix}-private-rt-nat" : "${local.name_prefix}-private-rt-no-nat"
   }
+}
+
+resource "aws_route" "private_nat_egress" {
+  count = var.enable_nat_gateway ? 1 : 0
+
+  route_table_id         = aws_route_table.private.id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.main[0].id
 }
 
 resource "aws_route_table_association" "private_app" {
@@ -887,6 +929,15 @@ resource "aws_opensearchserverless_security_policy" "encryption" {
   })
 }
 
+resource "aws_opensearchserverless_vpc_endpoint" "vectors" {
+  count = var.enable_opensearch_serverless ? 1 : 0
+
+  name               = "${local.opensearch_collection_name}-vpce"
+  vpc_id             = aws_vpc.main.id
+  subnet_ids         = [aws_subnet.private_app.id]
+  security_group_ids = [aws_security_group.vpc_endpoints.id]
+}
+
 resource "aws_opensearchserverless_security_policy" "network" {
   count = var.enable_opensearch_serverless ? 1 : 0
 
@@ -897,7 +948,8 @@ resource "aws_opensearchserverless_security_policy" "network" {
       ResourceType = "collection"
       Resource     = ["collection/${local.opensearch_collection_name}-vectors"]
     }]
-    AllowFromPublic = true
+    AllowFromPublic = false
+    SourceVPCEs     = [aws_opensearchserverless_vpc_endpoint.vectors[0].id]
   }])
 }
 
@@ -1710,7 +1762,8 @@ resource "aws_ecs_task_definition" "service" {
         { name = "SNS_TOPIC_ARN", value = aws_sns_topic.alerts.arn },
         { name = "RDS_ENDPOINT", value = var.enable_rds ? aws_db_instance.postgres[0].address : "" },
         { name = "REDIS_ENDPOINT", value = var.enable_redis ? aws_elasticache_cluster.redis[0].cache_nodes[0].address : "" }
-      ], local.layer_artifact_env, local.vector_db_env)
+      ], local.layer_artifact_env, local.vector_db_env, local.llm_env)
+      secrets = local.llm_secret_env
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -1752,7 +1805,8 @@ resource "aws_ecs_task_definition" "vector_db_init" {
       environment = concat([
         { name = "APP_NAME", value = "vector-db-init" },
         { name = "AWS_REGION", value = var.aws_region }
-      ], local.layer_artifact_env, local.vector_db_env)
+      ], local.layer_artifact_env, local.vector_db_env, local.llm_env)
+      secrets = local.llm_secret_env
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -1842,6 +1896,21 @@ resource "aws_ses_email_identity" "notification_sender" {
   count = var.ses_identity_email == null ? 0 : 1
 
   email = var.ses_identity_email
+}
+
+resource "aws_secretsmanager_secret" "llm" {
+  count = var.dashscope_api_key != "" ? 1 : 0
+
+  name        = "${local.name_prefix}/llm/dashscope"
+  description = "DashScope API key for Qwen LLM runtime"
+  kms_key_id  = aws_kms_key.main.arn
+}
+
+resource "aws_secretsmanager_secret_version" "llm" {
+  count = var.dashscope_api_key != "" ? 1 : 0
+
+  secret_id     = aws_secretsmanager_secret.llm[0].id
+  secret_string = var.dashscope_api_key
 }
 
 resource "aws_secretsmanager_secret" "external_connectors" {
