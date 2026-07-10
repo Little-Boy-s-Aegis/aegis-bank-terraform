@@ -2464,9 +2464,9 @@ resource "aws_sfn_state_machine" "orchestrator" {
     StartAt = "AggregateDecision"
     States = {
       AggregateDecision = {
-        Type   = "Pass"
-        Result = "Aggregate alerts, correlate context, and evaluate policy thresholds"
-        Next   = "ActionPlan"
+        Type    = "Pass"
+        Comment = "Aggregate alerts, correlate context, and evaluate policy thresholds"
+        Next    = "ActionPlan"
       }
       ActionPlan = {
         Type = "Choice"
