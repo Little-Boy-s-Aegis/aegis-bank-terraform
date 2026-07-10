@@ -392,6 +392,12 @@ variable "telegram_bot_token" {
   sensitive   = true
 }
 
+variable "telegram_chat_id" {
+  description = "Optional Telegram chat ID for alert notifications."
+  type        = string
+  default     = ""
+}
+
 variable "slack_webhook_url" {
   description = "Optional Slack webhook URL stored in Secrets Manager."
   type        = string

@@ -1,3 +1,12 @@
+terraform {
+  required_providers {
+    aws = {
+      source                = "hashicorp/aws"
+      configuration_aliases = [ aws.us_east_1 ]
+    }
+  }
+}
+
 data "aws_availability_zones" "available" {
   state = "available"
 }
@@ -69,6 +78,22 @@ locals {
       health_path    = "/health"
       description    = "HA orchestrator active/standby"
     }
+    be-backend = {
+      container_port = 8080
+      desired_count  = var.ecs_desired_count
+      health_path    = "/health"
+      description    = "Java Spring Boot Bank API"
+      cpu            = 512
+      memory         = 1024
+    }
+    fe-web = {
+      container_port = 8085
+      desired_count  = var.ecs_desired_count
+      health_path    = "/"
+      description    = "Next.js Web Portal"
+      cpu            = 512
+      memory         = 1024
+    }
   }
 
   opensearch_collection_name = substr(replace(lower(local.name_prefix), "_", "-"), 0, 23)
@@ -133,16 +158,44 @@ locals {
     { name = "BEDROCK_EMBEDDING_REGION", value = local.bedrock_embedding_region },
     { name = "BEDROCK_EMBEDDING_DIMENSIONS", value = tostring(var.bedrock_embedding_dimensions) },
     { name = "VECTOR_EMBEDDING_DIMENSIONS", value = tostring(var.bedrock_embedding_dimensions) },
-    { name = "LLM_ENABLED", value = tostring(var.llm_enabled) }
+    { name = "LLM_ENABLED", value = tostring(var.llm_enabled) },
+    { name = "TELEGRAM_CHAT_ID", value = var.telegram_chat_id }
   ]
   llm_secret_env = var.dashscope_api_key != "" ? [
     { name = "DASHSCOPE_API_KEY", valueFrom = aws_secretsmanager_secret.llm[0].arn }
   ] : []
-  backend_api_env = var.enable_rds ? [
-    { name = "SPRING_DATASOURCE_URL", value = "jdbc:postgresql://${aws_db_instance.postgres[0].address}:5432/${var.db_name}" },
-    { name = "SPRING_DATASOURCE_USERNAME", value = var.db_username }
-  ] : []
+  backend_api_env = concat(
+    var.enable_rds ? [
+      { name = "DB_HOST", value = aws_db_instance.postgres[0].address },
+      { name = "DB_USER", value = var.db_username },
+      { name = "DB_NAME", value = var.db_name },
+      { name = "DB_PORT", value = "5432" }
+    ] : [],
+    [
+      { name = "FRONTEND_URL", value = "https://${aws_cloudfront_distribution.dashboard.domain_name}" },
+      { name = "BANK_BACKEND_URL", value = "http://be-backend.ai-native-soc-hackathon.local:8080" },
+      { name = "PORT", value = "8080" }
+    ]
+  )
   backend_api_secret_env = concat(
+    var.enable_rds ? [
+      { name = "DB_PASSWORD", valueFrom = "${aws_secretsmanager_secret.db[0].arn}:password::" }
+    ] : [],
+    [
+      { name = "JWT_SECRET", valueFrom = "${aws_secretsmanager_secret.backend_app.arn}:jwt_secret::" },
+      { name = "AEGIS_INTERNAL_TOKEN", valueFrom = "${aws_secretsmanager_secret.backend_app.arn}:aegis_security_sync_token::" }
+    ]
+  )
+  be_backend_env = concat(
+    var.enable_rds ? [
+      { name = "SPRING_DATASOURCE_URL", value = "jdbc:postgresql://${aws_db_instance.postgres[0].address}:5432/${var.db_name}" },
+      { name = "SPRING_DATASOURCE_USERNAME", value = var.db_username }
+    ] : [],
+    [
+      { name = "KAFKA_BOOTSTRAP_SERVERS", value = "localhost:9094" }
+    ]
+  )
+  be_backend_secret_env = concat(
     var.enable_rds ? [
       { name = "SPRING_DATASOURCE_PASSWORD", valueFrom = "${aws_secretsmanager_secret.db[0].arn}:password::" }
     ] : [],
@@ -151,6 +204,12 @@ locals {
       { name = "AEGIS_SECURITY_SYNC_TOKEN", valueFrom = "${aws_secretsmanager_secret.backend_app.arn}:aegis_security_sync_token::" }
     ]
   )
+  fe_web_env = [
+    { name = "BE_BACKEND_URL", value = "http://be-backend.ai-native-soc-hackathon.local:8080" },
+    { name = "DASHBOARD_BACKEND_URL", value = "http://backend-api.ai-native-soc-hackathon.local:8080" },
+    { name = "DASHBOARD_FRONTEND_URL", value = "https://${aws_cloudfront_distribution.dashboard.domain_name}" },
+    { name = "PORT", value = "8085" }
+  ]
 }
 
 resource "aws_vpc" "main" {
@@ -481,12 +540,24 @@ resource "aws_vpc_security_group_ingress_rule" "alb_https" {
   to_port           = 443
 }
 
+data "aws_ec2_managed_prefix_list" "cloudfront_origin_facing" {
+  name = "com.amazonaws.global.cloudfront.origin-facing"
+}
+
+resource "aws_vpc_security_group_ingress_rule" "alb_http_from_cloudfront" {
+  security_group_id = aws_security_group.alb.id
+  prefix_list_id    = data.aws_ec2_managed_prefix_list.cloudfront_origin_facing.id
+  from_port         = 80
+  ip_protocol       = "tcp"
+  to_port           = 80
+}
+
 resource "aws_vpc_security_group_egress_rule" "alb_to_ecs" {
   security_group_id            = aws_security_group.alb.id
   referenced_security_group_id = aws_security_group.ecs_tasks.id
   from_port                    = 8080
   ip_protocol                  = "tcp"
-  to_port                      = 8084
+  to_port                      = 8087
 }
 
 resource "aws_security_group" "ecs_tasks" {
@@ -504,7 +575,7 @@ resource "aws_vpc_security_group_ingress_rule" "ecs_from_alb" {
   referenced_security_group_id = aws_security_group.alb.id
   from_port                    = 8080
   ip_protocol                  = "tcp"
-  to_port                      = 8084
+  to_port                      = 8087
 }
 
 resource "aws_vpc_security_group_egress_rule" "ecs_all_egress" {
@@ -662,6 +733,36 @@ resource "aws_service_discovery_service" "qdrant" {
 
   health_check_custom_config {
     failure_threshold = 1
+  }
+}
+
+resource "aws_service_discovery_service" "be_backend" {
+  name = "be-backend"
+
+  dns_config {
+    namespace_id = aws_service_discovery_private_dns_namespace.main[0].id
+
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
+
+    routing_policy = "MULTIVALUE"
+  }
+}
+
+resource "aws_service_discovery_service" "backend_api" {
+  name = "backend-api"
+
+  dns_config {
+    namespace_id = aws_service_discovery_private_dns_namespace.main[0].id
+
+    dns_records {
+      ttl  = 10
+      type = "A"
+    }
+
+    routing_policy = "MULTIVALUE"
   }
 }
 
@@ -1935,6 +2036,52 @@ resource "aws_lb_target_group" "backend" {
   }
 }
 
+resource "aws_lb_target_group" "be_backend" {
+  name        = "${substr(local.name_prefix, 0, 18)}-be-bk-tg"
+  port        = 8080
+  protocol    = "HTTP"
+  target_type = "ip"
+  vpc_id      = aws_vpc.main.id
+
+  health_check {
+    enabled             = true
+    healthy_threshold   = 2
+    interval            = 30
+    matcher             = "200-399"
+    path                = "/health"
+    timeout             = 5
+    unhealthy_threshold = 3
+  }
+
+  tags = {
+    Name  = "${local.name_prefix}-be-backend-tg"
+    Layer = "network"
+  }
+}
+
+resource "aws_lb_target_group" "fe_web" {
+  name        = "${substr(local.name_prefix, 0, 18)}-fe-web-tg"
+  port        = 8085
+  protocol    = "HTTP"
+  target_type = "ip"
+  vpc_id      = aws_vpc.main.id
+
+  health_check {
+    enabled             = true
+    healthy_threshold   = 2
+    interval            = 30
+    matcher             = "200-399"
+    path                = "/"
+    timeout             = 5
+    unhealthy_threshold = 3
+  }
+
+  tags = {
+    Name  = "${local.name_prefix}-fe-web-tg"
+    Layer = "network"
+  }
+}
+
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.app.arn
   port              = 80
@@ -1942,7 +2089,39 @@ resource "aws_lb_listener" "http" {
 
   default_action {
     type             = "forward"
+    target_group_arn = aws_lb_target_group.fe_web.arn
+  }
+}
+
+resource "aws_lb_listener_rule" "api" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 10
+
+  action {
+    type             = "forward"
     target_group_arn = aws_lb_target_group.backend.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/api/*"]
+    }
+  }
+}
+
+resource "aws_lb_listener_rule" "api_bank" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 20
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.be_backend.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/api-bank/*"]
+    }
   }
 }
 
@@ -1952,8 +2131,8 @@ resource "aws_ecs_task_definition" "service" {
   family                   = "${local.name_prefix}-${each.key}"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = tostring(var.ecs_cpu)
-  memory                   = tostring(var.ecs_memory)
+  cpu                      = tostring(lookup(each.value, "cpu", var.ecs_cpu))
+  memory                   = tostring(lookup(each.value, "memory", var.ecs_memory))
   execution_role_arn       = aws_iam_role.ecs_execution.arn
   task_role_arn            = aws_iam_role.ecs_task.arn
 
@@ -1986,8 +2165,8 @@ resource "aws_ecs_task_definition" "service" {
         { name = "SNS_TOPIC_ARN", value = aws_sns_topic.alerts.arn },
         { name = "RDS_ENDPOINT", value = var.enable_rds ? aws_db_instance.postgres[0].address : "" },
         { name = "REDIS_ENDPOINT", value = var.enable_redis ? aws_elasticache_cluster.redis[0].cache_nodes[0].address : "" }
-      ], each.key == "backend-api" ? local.backend_api_env : [], local.layer_artifact_env, local.vector_db_env, local.llm_env)
-      secrets = concat(local.llm_secret_env, each.key == "backend-api" ? local.backend_api_secret_env : [])
+      ], each.key == "backend-api" ? local.backend_api_env : (each.key == "be-backend" ? local.be_backend_env : (each.key == "fe-web" ? local.fe_web_env : [])), local.layer_artifact_env, local.vector_db_env, local.llm_env)
+      secrets = concat(local.llm_secret_env, var.telegram_bot_token != "" ? [{ name = "TELEGRAM_BOT_TOKEN", valueFrom = "${aws_secretsmanager_secret.external_connectors.arn}:telegram_bot_token::" }] : [], each.key == "backend-api" ? local.backend_api_secret_env : (each.key == "be-backend" ? local.be_backend_secret_env : []), each.key == "orchestrator-ha" || each.key == "worker-service" ? [{ name = "AEGIS_INTERNAL_TOKEN", valueFrom = "${aws_secretsmanager_secret.backend_app.arn}:aegis_security_sync_token::" }] : [])
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -2163,6 +2342,7 @@ resource "aws_ecs_service" "service" {
   desired_count          = each.value.desired_count
   enable_execute_command = true
   wait_for_steady_state  = false
+  health_check_grace_period_seconds = each.key == "be-backend" || each.key == "fe-web" || each.key == "backend-api" ? 180 : 0
 
   deployment_minimum_healthy_percent = each.value.desired_count > 1 ? 50 : 0
   deployment_maximum_percent         = 200
@@ -2179,12 +2359,20 @@ resource "aws_ecs_service" "service" {
   }
 
   dynamic "load_balancer" {
-    for_each = each.key == "backend-api" ? [1] : []
+    for_each = each.key == "backend-api" ? [1] : (each.key == "be-backend" ? [1] : (each.key == "fe-web" ? [1] : []))
 
     content {
-      target_group_arn = aws_lb_target_group.backend.arn
+      target_group_arn = each.key == "backend-api" ? aws_lb_target_group.backend.arn : (each.key == "be-backend" ? aws_lb_target_group.be_backend.arn : aws_lb_target_group.fe_web.arn)
       container_name   = each.key
       container_port   = each.value.container_port
+    }
+  }
+
+  dynamic "service_registries" {
+    for_each = each.key == "be-backend" ? [1] : (each.key == "backend-api" ? [1] : [])
+
+    content {
+      registry_arn = each.key == "be-backend" ? aws_service_discovery_service.be_backend.arn : aws_service_discovery_service.backend_api.arn
     }
   }
 
@@ -2381,11 +2569,29 @@ resource "aws_cloudfront_origin_access_control" "dashboard" {
   signing_protocol                  = "sigv4"
 }
 
+resource "aws_cloudfront_function" "rewrite_soc" {
+  name    = "${substr(replace(local.name_prefix, "_", "-"), 0, 18)}-rewrite-soc"
+  runtime = "cloudfront-js-2.0"
+  comment = "Rewrite root and /soc requests to /soc/index.html"
+  publish = true
+  code    = <<EOF
+function handler(event) {
+    var request = event.request;
+    var uri = request.uri;
+    
+    if (uri === '/' || uri === '/index.html' || uri === '/soc' || uri === '/soc/') {
+        request.uri = '/soc/index.html';
+    }
+    return request;
+}
+EOF
+}
+
 resource "aws_cloudfront_distribution" "dashboard" {
   enabled             = true
-  default_root_object = "index.html"
   comment             = "${local.name_prefix} SOC dashboard"
   price_class         = var.cloudfront_price_class
+  aliases             = ["littleboys.biz", "www.littleboys.biz"]
 
   origin {
     domain_name              = aws_s3_bucket.dashboard.bucket_regional_domain_name
@@ -2393,7 +2599,41 @@ resource "aws_cloudfront_distribution" "dashboard" {
     origin_access_control_id = aws_cloudfront_origin_access_control.dashboard.id
   }
 
-  default_cache_behavior {
+  origin {
+    domain_name = aws_lb.app.dns_name
+    origin_id   = "backend-alb"
+
+    custom_origin_config {
+      http_port                = 80
+      https_port               = 443
+      origin_protocol_policy   = "http-only"
+      origin_ssl_protocols     = ["TLSv1.2"]
+    }
+  }
+
+  ordered_cache_behavior {
+    path_pattern     = "/api/*"
+    allowed_methods  = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "backend-alb"
+
+    forwarded_values {
+      query_string = true
+      headers      = ["Accept", "Authorization", "Content-Type", "Origin", "Referer"]
+
+      cookies {
+        forward = "all"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 0
+    max_ttl                = 0
+  }
+
+  ordered_cache_behavior {
+    path_pattern     = "/soc*"
     allowed_methods  = ["GET", "HEAD", "OPTIONS"]
     cached_methods   = ["GET", "HEAD"]
     target_origin_id = "dashboard-s3"
@@ -2406,11 +2646,36 @@ resource "aws_cloudfront_distribution" "dashboard" {
       }
     }
 
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.rewrite_soc.arn
+    }
+
     viewer_protocol_policy = "redirect-to-https"
     min_ttl                = 0
     default_ttl            = 300
     max_ttl                = 3600
     compress               = true
+  }
+
+  default_cache_behavior {
+    allowed_methods  = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "backend-alb"
+
+    forwarded_values {
+      query_string = true
+      headers      = ["Accept", "Authorization", "Content-Type", "Origin", "Referer"]
+
+      cookies {
+        forward = "all"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 0
+    max_ttl                = 0
   }
 
   restrictions {
@@ -2420,7 +2685,9 @@ resource "aws_cloudfront_distribution" "dashboard" {
   }
 
   viewer_certificate {
-    cloudfront_default_certificate = true
+    acm_certificate_arn      = aws_acm_certificate_validation.cert.certificate_arn
+    ssl_support_method       = "sni-only"
+    minimum_protocol_version = "TLSv1.2_2021"
   }
 
   tags = {
@@ -2442,7 +2709,10 @@ data "aws_iam_policy_document" "dashboard_bucket" {
     condition {
       test     = "StringEquals"
       variable = "AWS:SourceArn"
-      values   = [aws_cloudfront_distribution.dashboard.arn]
+      values   = [
+        aws_cloudfront_distribution.dashboard.arn,
+        aws_cloudfront_distribution.soc.arn
+      ]
     }
   }
 }
@@ -2663,7 +2933,259 @@ resource "aws_iam_role_policy" "github_actions" {
           "iam:PassRole"
         ]
         Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject",
+          "s3:ListBucket",
+          "s3:DeleteObject"
+        ]
+        Resource = [
+          aws_s3_bucket.dashboard.arn,
+          "${aws_s3_bucket.dashboard.arn}/*"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "cloudfront:CreateInvalidation"
+        ]
+        Resource = "*"
       }
     ]
   })
+}
+
+# Custom Domain Route 53 & ACM Resources
+resource "aws_route53_zone" "littleboys_biz" {
+  name = "littleboys.biz"
+}
+
+resource "aws_acm_certificate" "cert" {
+  provider          = aws.us_east_1
+  domain_name       = "littleboys.biz"
+  validation_method = "DNS"
+
+  subject_alternative_names = [
+    "*.littleboys.biz"
+  ]
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_route53_record" "cert_validation" {
+  for_each = {
+    for dvo in aws_acm_certificate.cert.domain_validation_options : dvo.domain_name => {
+      name   = dvo.resource_record_name
+      record = dvo.resource_record_value
+      type   = dvo.resource_record_type
+    }
+  }
+
+  allow_overwrite = true
+  name            = each.value.name
+  records         = [each.value.record]
+  ttl             = 60
+  type            = each.value.type
+  zone_id         = aws_route53_zone.littleboys_biz.zone_id
+}
+
+resource "aws_acm_certificate_validation" "cert" {
+  provider                = aws.us_east_1
+  certificate_arn         = aws_acm_certificate.cert.arn
+  validation_record_fqdns = [for record in aws_route53_record.cert_validation : record.fqdn]
+}
+
+resource "aws_cloudfront_distribution" "soc" {
+  enabled             = true
+  comment             = "${local.name_prefix} SOC subdomain dashboard"
+  price_class         = var.cloudfront_price_class
+  aliases             = ["soc.littleboys.biz"]
+
+  origin {
+    domain_name              = aws_s3_bucket.dashboard.bucket_regional_domain_name
+    origin_id                = "dashboard-s3"
+    origin_access_control_id = aws_cloudfront_origin_access_control.dashboard.id
+  }
+
+  origin {
+    domain_name = aws_lb.app.dns_name
+    origin_id   = "backend-alb"
+
+    custom_origin_config {
+      http_port                = 80
+      https_port               = 443
+      origin_protocol_policy   = "http-only"
+      origin_ssl_protocols     = ["TLSv1.2"]
+    }
+  }
+
+  ordered_cache_behavior {
+    path_pattern     = "/api/*"
+    allowed_methods  = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "backend-alb"
+
+    forwarded_values {
+      query_string = true
+      headers      = ["Accept", "Authorization", "Content-Type", "Origin", "Referer"]
+
+      cookies {
+        forward = "all"
+      }
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 0
+    max_ttl                = 0
+  }
+
+  default_cache_behavior {
+    allowed_methods  = ["GET", "HEAD", "OPTIONS"]
+    cached_methods   = ["GET", "HEAD"]
+    target_origin_id = "dashboard-s3"
+
+    forwarded_values {
+      query_string = false
+
+      cookies {
+        forward = "none"
+      }
+    }
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.rewrite_soc.arn
+    }
+
+    viewer_protocol_policy = "redirect-to-https"
+    min_ttl                = 0
+    default_ttl            = 300
+    max_ttl                = 3600
+    compress               = true
+  }
+
+  restrictions {
+    geo_restriction {
+      restriction_type = "none"
+    }
+  }
+
+  viewer_certificate {
+    acm_certificate_arn      = aws_acm_certificate_validation.cert.certificate_arn
+    ssl_support_method       = "sni-only"
+    minimum_protocol_version = "TLSv1.2_2021"
+  }
+
+  tags = {
+    Name  = "${local.name_prefix}-soc-subdomain"
+    Layer = "reporting"
+  }
+}
+
+resource "aws_route53_record" "bank_ipv4" {
+  zone_id = aws_route53_zone.littleboys_biz.zone_id
+  name    = "littleboys.biz"
+  type    = "A"
+
+  alias {
+    name                   = aws_cloudfront_distribution.dashboard.domain_name
+    zone_id                = aws_cloudfront_distribution.dashboard.hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "bank_ipv6" {
+  zone_id = aws_route53_zone.littleboys_biz.zone_id
+  name    = "littleboys.biz"
+  type    = "AAAA"
+
+  alias {
+    name                   = aws_cloudfront_distribution.dashboard.domain_name
+    zone_id                = aws_cloudfront_distribution.dashboard.hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "bank_www_ipv4" {
+  zone_id = aws_route53_zone.littleboys_biz.zone_id
+  name    = "www.littleboys.biz"
+  type    = "A"
+
+  alias {
+    name                   = aws_cloudfront_distribution.dashboard.domain_name
+    zone_id                = aws_cloudfront_distribution.dashboard.hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "bank_www_ipv6" {
+  zone_id = aws_route53_zone.littleboys_biz.zone_id
+  name    = "www.littleboys.biz"
+  type    = "AAAA"
+
+  alias {
+    name                   = aws_cloudfront_distribution.dashboard.domain_name
+    zone_id                = aws_cloudfront_distribution.dashboard.hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "soc_ipv4" {
+  zone_id = aws_route53_zone.littleboys_biz.zone_id
+  name    = "soc.littleboys.biz"
+  type    = "A"
+
+  alias {
+    name                   = aws_cloudfront_distribution.soc.domain_name
+    zone_id                = aws_cloudfront_distribution.soc.hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "soc_ipv6" {
+  zone_id = aws_route53_zone.littleboys_biz.zone_id
+  name    = "soc.littleboys.biz"
+  type    = "AAAA"
+
+  alias {
+    name                   = aws_cloudfront_distribution.soc.domain_name
+    zone_id                = aws_cloudfront_distribution.soc.hosted_zone_id
+    evaluate_target_health = false
+  }
+}
+
+resource "aws_route53_record" "google_mx" {
+  zone_id = aws_route53_zone.littleboys_biz.zone_id
+  name    = ""
+  type    = "MX"
+  ttl     = 3600
+  records = [
+    "1 smtp.google.com"
+  ]
+}
+
+resource "aws_route53_record" "google_spf" {
+  zone_id = aws_route53_zone.littleboys_biz.zone_id
+  name    = ""
+  type    = "TXT"
+  ttl     = 3600
+  records = [
+    "v=spf1 include:_spf.google.com ~all"
+  ]
+}
+
+resource "aws_route53_record" "google_dkim" {
+  zone_id = aws_route53_zone.littleboys_biz.zone_id
+  name    = "google._domainkey"
+  type    = "TXT"
+  ttl     = 3600
+  records = [
+    "v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1M0XYfh1BYjSFKmm2VulQvJUREAsIWSHyBHkpA+6vsV4kIgnsYk+AKXzsA5RW8Fh25nJYHXiONezSFUz2tVmN1ib0saSaCjaAaAMiDjl5OOz7dGMvZO8qlSFVM8cJ4scdlpBpufZ/f5RlVziUWOfaT1e8+VGTt6LV/jiqeBABF4v8Gq0Nuh0aRXTWGWarxDq6\" \"yZorGWMikpJTLv/xXFeVWpOshR7rEA50hFrgXg8xmmRE7ISFZe8EZAoPowTY4wyaN6VQ0QPUMUJ8KlTCeZt8+txovUWTD+dCLg6WnCbzuTIIVWih2huRPi4eISO9rnBRqNc/XIF2SUPRF49VRRLAwIDAQAB"
+  ]
 }

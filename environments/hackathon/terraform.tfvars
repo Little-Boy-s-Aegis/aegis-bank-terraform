@@ -8,7 +8,9 @@ enable_ecs_container_insights = false
 enable_opensearch_serverless  = false
 enable_qdrant                 = true
 enable_nat_gateway            = true
-enable_github_oidc            = false
+enable_github_oidc            = true
+github_owner                 = "Little-Boy-s-Aegis"
+github_repository            = "dashboard"
 
 ecs_cpu                    = 256
 ecs_memory                 = 512
@@ -19,8 +21,10 @@ force_destroy_buckets = true
 audit_retention_days  = 30
 log_retention_days    = 14
 
-allowed_http_cidr_blocks = ["42.117.110.32/32"]
+allowed_http_cidr_blocks = ["0.0.0.0/0"]
 sns_email_subscriptions  = ["voduchieu42@gmail.com"]
+telegram_bot_token       = "8667720063:AAF4M0vpuoVECb5Kv5qeesvPBVTVvErkfDQ"
+telegram_chat_id         = "1628206759"
 
 llm_provider                 = "bedrock"
 bedrock_model_id             = "qwen.qwen3-coder-next"

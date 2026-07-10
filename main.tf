@@ -66,6 +66,7 @@ module "hackathon" {
   sns_email_subscriptions        = var.sns_email_subscriptions
   ses_identity_email             = var.ses_identity_email
   telegram_bot_token             = var.telegram_bot_token
+  telegram_chat_id               = var.telegram_chat_id
   slack_webhook_url              = var.slack_webhook_url
   jira_base_url                  = var.jira_base_url
   jira_api_token                 = var.jira_api_token
@@ -77,6 +78,11 @@ module "hackathon" {
   github_owner                   = var.github_owner
   github_repository              = var.github_repository
   github_oidc_thumbprints        = var.github_oidc_thumbprints
+
+  providers = {
+    aws           = aws
+    aws.us_east_1 = aws.us_east_1
+  }
 }
 
 module "production" {
@@ -128,6 +134,7 @@ module "production" {
   sns_email_subscriptions        = var.sns_email_subscriptions
   ses_identity_email             = var.ses_identity_email
   telegram_bot_token             = var.telegram_bot_token
+  telegram_chat_id               = var.telegram_chat_id
   slack_webhook_url              = var.slack_webhook_url
   jira_base_url                  = var.jira_base_url
   jira_api_token                 = var.jira_api_token

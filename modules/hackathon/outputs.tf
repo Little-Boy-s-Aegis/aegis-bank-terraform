@@ -178,3 +178,8 @@ output "cost_controls" {
     audit_object_lock_days          = var.audit_retention_days
   }
 }
+
+output "route53_name_servers" {
+  description = "Name servers for Route 53 zone."
+  value       = aws_route53_zone.littleboys_biz.name_servers
+}

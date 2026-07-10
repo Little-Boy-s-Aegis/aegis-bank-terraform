@@ -161,3 +161,8 @@ output "cost_controls" {
   description = "Important cost-control switches."
   value       = local.active_profile.cost_controls
 }
+
+output "route53_name_servers" {
+  description = "Name servers for Route 53 zone."
+  value       = var.deployment_profile == "hackathon" ? module.hackathon[0].route53_name_servers : []
+}
