@@ -9,9 +9,20 @@ resource "random_id" "bucket_suffix" {
 }
 
 resource "random_password" "db" {
-  count   = var.enable_rds ? 1 : 0
-  length  = 24
-  special = true
+  count            = var.enable_rds ? 1 : 0
+  length           = 24
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}<>:?"
+}
+
+resource "random_password" "backend_jwt" {
+  length  = 64
+  special = false
+}
+
+resource "random_password" "backend_sync_token" {
+  length  = 48
+  special = false
 }
 
 locals {
@@ -105,6 +116,8 @@ locals {
   vector_db_env = [
     { name = "VECTOR_DB_PROVIDER", value = local.vector_db_provider },
     { name = "QDRANT_URL", value = local.effective_qdrant_url },
+    { name = "QDRANT_L1_COLLECTION", value = local.vector_l1_index },
+    { name = "QDRANT_L2_COLLECTION", value = local.vector_l2_index },
     { name = "OPENSEARCH_ENDPOINT", value = local.vector_db_provider == "opensearch" ? aws_opensearchserverless_collection.vectors[0].collection_endpoint : "" },
     { name = "OPENSEARCH_SERVICE", value = "aoss" },
     { name = "OPENSEARCH_L1_INDEX", value = local.vector_l1_index },
@@ -125,6 +138,19 @@ locals {
   llm_secret_env = var.dashscope_api_key != "" ? [
     { name = "DASHSCOPE_API_KEY", valueFrom = aws_secretsmanager_secret.llm[0].arn }
   ] : []
+  backend_api_env = var.enable_rds ? [
+    { name = "SPRING_DATASOURCE_URL", value = "jdbc:postgresql://${aws_db_instance.postgres[0].address}:5432/${var.db_name}" },
+    { name = "SPRING_DATASOURCE_USERNAME", value = var.db_username }
+  ] : []
+  backend_api_secret_env = concat(
+    var.enable_rds ? [
+      { name = "SPRING_DATASOURCE_PASSWORD", valueFrom = "${aws_secretsmanager_secret.db[0].arn}:password::" }
+    ] : [],
+    [
+      { name = "JWT_SECRET", valueFrom = "${aws_secretsmanager_secret.backend_app.arn}:jwt_secret::" },
+      { name = "AEGIS_SECURITY_SYNC_TOKEN", valueFrom = "${aws_secretsmanager_secret.backend_app.arn}:aegis_security_sync_token::" }
+    ]
+  )
 }
 
 resource "aws_vpc" "main" {
@@ -321,6 +347,16 @@ resource "aws_security_group" "vpc_endpoints" {
 resource "aws_vpc_security_group_ingress_rule" "vpc_endpoint_https_from_ecs" {
   security_group_id            = aws_security_group.vpc_endpoints.id
   referenced_security_group_id = aws_security_group.ecs_tasks.id
+  from_port                    = 443
+  ip_protocol                  = "tcp"
+  to_port                      = 443
+}
+
+resource "aws_vpc_security_group_ingress_rule" "vpc_endpoint_https_from_qdrant" {
+  count = var.enable_qdrant ? 1 : 0
+
+  security_group_id            = aws_security_group.vpc_endpoints.id
+  referenced_security_group_id = aws_security_group.qdrant[0].id
   from_port                    = 443
   ip_protocol                  = "tcp"
   to_port                      = 443
@@ -925,7 +961,7 @@ resource "aws_s3_object" "layer1_artifacts" {
   bucket                 = aws_s3_bucket.layer_artifacts.id
   key                    = "layer1/${each.value}"
   source                 = "${local.layer1_artifacts_root}/${each.value}"
-  etag                   = filemd5("${local.layer1_artifacts_root}/${each.value}")
+  source_hash            = filemd5("${local.layer1_artifacts_root}/${each.value}")
   content_type           = endswith(each.value, ".json") ? "application/json" : "text/markdown"
   server_side_encryption = "aws:kms"
   kms_key_id             = aws_kms_key.main.arn
@@ -942,7 +978,7 @@ resource "aws_s3_object" "layer2_artifacts" {
   bucket                 = aws_s3_bucket.layer_artifacts.id
   key                    = "layer2/${each.value}"
   source                 = "${local.layer2_artifacts_root}/${each.value}"
-  etag                   = filemd5("${local.layer2_artifacts_root}/${each.value}")
+  source_hash            = filemd5("${local.layer2_artifacts_root}/${each.value}")
   content_type           = endswith(each.value, ".json") ? "application/json" : "text/markdown"
   server_side_encryption = "aws:kms"
   kms_key_id             = aws_kms_key.main.arn
@@ -969,6 +1005,20 @@ resource "aws_secretsmanager_secret_version" "db" {
     username = var.db_username
     password = random_password.db[0].result
     database = var.db_name
+  })
+}
+
+resource "aws_secretsmanager_secret" "backend_app" {
+  name        = "${local.name_prefix}/backend/app"
+  description = "Generated backend API application secrets"
+  kms_key_id  = aws_kms_key.main.arn
+}
+
+resource "aws_secretsmanager_secret_version" "backend_app" {
+  secret_id = aws_secretsmanager_secret.backend_app.id
+  secret_string = jsonencode({
+    jwt_secret                = random_password.backend_jwt.result
+    aegis_security_sync_token = random_password.backend_sync_token.result
   })
 }
 
@@ -1741,6 +1791,19 @@ resource "aws_iam_role_policy" "logs_to_firehose" {
           "firehose:PutRecordBatch"
         ]
         Resource = aws_kinesis_firehose_delivery_stream.audit.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:Encrypt",
+          "kms:GenerateDataKey",
+          "kms:GenerateDataKeyWithoutPlaintext",
+          "kms:DescribeKey",
+          "kms:ReEncryptFrom",
+          "kms:ReEncryptTo"
+        ]
+        Resource = aws_kms_key.main.arn
       }
     ]
   })
@@ -1923,8 +1986,8 @@ resource "aws_ecs_task_definition" "service" {
         { name = "SNS_TOPIC_ARN", value = aws_sns_topic.alerts.arn },
         { name = "RDS_ENDPOINT", value = var.enable_rds ? aws_db_instance.postgres[0].address : "" },
         { name = "REDIS_ENDPOINT", value = var.enable_redis ? aws_elasticache_cluster.redis[0].cache_nodes[0].address : "" }
-      ], local.layer_artifact_env, local.vector_db_env, local.llm_env)
-      secrets = local.llm_secret_env
+      ], each.key == "backend-api" ? local.backend_api_env : [], local.layer_artifact_env, local.vector_db_env, local.llm_env)
+      secrets = concat(local.llm_secret_env, each.key == "backend-api" ? local.backend_api_secret_env : [])
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -2508,6 +2571,8 @@ resource "aws_cloudwatch_log_subscription_filter" "ecs_to_audit" {
   destination_arn = aws_kinesis_firehose_delivery_stream.audit.arn
   role_arn        = aws_iam_role.logs_to_firehose.arn
   distribution    = "ByLogStream"
+
+  depends_on = [aws_iam_role_policy.logs_to_firehose]
 }
 
 resource "aws_iam_openid_connect_provider" "github" {

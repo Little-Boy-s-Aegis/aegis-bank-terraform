@@ -3,7 +3,7 @@ project_name       = "ai-native-soc"
 environment        = "hackathon"
 deployment_profile = "hackathon"
 
-use_fargate_spot              = true
+use_fargate_spot              = false
 enable_ecs_container_insights = false
 enable_opensearch_serverless  = false
 enable_qdrant                 = true
