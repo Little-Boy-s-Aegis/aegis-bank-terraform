@@ -75,6 +75,18 @@ variable "allowed_http_cidr_blocks" {
   default     = ["0.0.0.0/0"]
 }
 
+variable "waf_blocked_ipv4_cidrs" {
+  description = "IPv4 CIDR ranges blocked by the hackathon ALB WAF IP set."
+  type        = list(string)
+  default     = []
+}
+
+variable "network_blocked_ipv4_cidrs" {
+  description = "IPv4 CIDR ranges denied at the hackathon public subnet network ACL."
+  type        = list(string)
+  default     = []
+}
+
 variable "enable_interface_endpoints" {
   description = "Create interface VPC endpoints instead of a NAT Gateway."
   type        = bool
@@ -184,6 +196,12 @@ variable "container_image_overrides" {
   description = "Optional ECS image overrides by service key: backend-api, layer1-agents, layer2-meta-analyzer, worker-service, orchestrator-ha."
   type        = map(string)
   default     = {}
+}
+
+variable "kafka_bootstrap_servers" {
+  description = "Optional Kafka/MSK bootstrap servers used by services that publish or consume security events. Leave empty when Kafka is not deployed for this stack."
+  type        = string
+  default     = ""
 }
 
 variable "layer1_artifacts_path" {
@@ -530,3 +548,10 @@ variable "github_oidc_thumbprints" {
   type        = list(string)
   default     = ["6938fd4d98bab03faadb97b34396831e3780aea1"]
 }
+
+variable "use_custom_domain" {
+  description = "Configure custom domains (Route53, ACM certs) for CloudFront. Set to false to use default CloudFront domains for fast automated setup."
+  type        = bool
+  default     = false
+}
+

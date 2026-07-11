@@ -9,8 +9,8 @@ enable_opensearch_serverless  = false
 enable_qdrant                 = true
 enable_nat_gateway            = true
 enable_github_oidc            = true
-github_owner                 = "Little-Boy-s-Aegis"
-github_repository            = "dashboard"
+github_owner                  = "Little-Boy-s-Aegis"
+github_repository             = "dashboard"
 
 ecs_cpu                    = 256
 ecs_memory                 = 512

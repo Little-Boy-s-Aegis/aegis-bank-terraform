@@ -2,7 +2,7 @@ terraform {
   required_providers {
     aws = {
       source                = "hashicorp/aws"
-      configuration_aliases = [ aws.us_east_1 ]
+      configuration_aliases = [aws.us_east_1]
     }
   }
 }
@@ -148,6 +148,48 @@ locals {
     { name = "OPENSEARCH_L1_INDEX", value = local.vector_l1_index },
     { name = "OPENSEARCH_L2_INDEX", value = local.vector_l2_index }
   ]
+  waf_blocklist_env = [
+    { name = "AWS_WAF_SCOPE", value = "REGIONAL" },
+    { name = "AWS_WAF_IP_SET_NAME", value = aws_wafv2_ip_set.blocked_ipv4.name },
+    { name = "AWS_WAF_IP_SET_ID", value = aws_wafv2_ip_set.blocked_ipv4.id },
+    { name = "AWS_WAF_CLOUDFRONT_SCOPE", value = "CLOUDFRONT" },
+    { name = "AWS_WAF_CLOUDFRONT_REGION", value = "us-east-1" },
+    { name = "AWS_WAF_CLOUDFRONT_IP_SET_NAME", value = aws_wafv2_ip_set.cloudfront_blocked_ipv4.name },
+    { name = "AWS_WAF_CLOUDFRONT_IP_SET_ID", value = aws_wafv2_ip_set.cloudfront_blocked_ipv4.id },
+    { name = "AWS_NETWORK_ACL_ID", value = aws_network_acl.public_edge.id },
+    { name = "AWS_NETWORK_ACL_RULE_START", value = "2000" },
+    { name = "AWS_NETWORK_ACL_RULE_LIMIT", value = "200" },
+    { name = "AWS_WAF_SIMULATION", value = "false" }
+  ]
+  waf_block_response_html = trimspace(<<HTML
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Access Revoked | Aegis Bank</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #070b12; color: #f8fafc; font-family: Inter, Arial, sans-serif; }
+    main { width: min(560px, calc(100vw - 32px)); border: 1px solid rgba(244,63,94,.36); background: linear-gradient(180deg,#141927,#0d111c); padding: 32px; box-shadow: 0 24px 80px rgba(0,0,0,.4); border-radius: 8px; }
+    .eyebrow { color: #fb7185; font: 700 12px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .16em; text-transform: uppercase; }
+    h1 { margin: 14px 0 12px; font-size: 30px; line-height: 1.1; }
+    p { margin: 8px 0; color: #cbd5e1; line-height: 1.55; }
+    code { display: inline-block; margin-top: 16px; padding: 8px 10px; background: rgba(244,63,94,.13); color: #fecdd3; border: 1px solid rgba(244,63,94,.28); border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">403 IP Banned</div>
+    <h1>Access revoked</h1>
+    <p>This IP address has been blocked by the Aegis SOC security policy.</p>
+    <p>The request was stopped at the edge before reaching the application.</p>
+    <code>AEGIS_EDGE_BLOCK</code>
+  </main>
+</body>
+</html>
+HTML
+  )
   llm_env = [
     { name = "LLM_PROVIDER", value = var.llm_provider },
     { name = "QWEN_MODEL_NAME", value = var.qwen_model_name },
@@ -159,18 +201,35 @@ locals {
     { name = "BEDROCK_EMBEDDING_DIMENSIONS", value = tostring(var.bedrock_embedding_dimensions) },
     { name = "VECTOR_EMBEDDING_DIMENSIONS", value = tostring(var.bedrock_embedding_dimensions) },
     { name = "LLM_ENABLED", value = tostring(var.llm_enabled) },
+    { name = "LLM_TIMEOUT_SECONDS", value = "60" },
+    { name = "EMBEDDING_TIMEOUT_SECONDS", value = "60" },
     { name = "TELEGRAM_CHAT_ID", value = var.telegram_chat_id }
   ]
   llm_secret_env = var.dashscope_api_key != "" ? [
     { name = "DASHSCOPE_API_KEY", valueFrom = aws_secretsmanager_secret.llm[0].arn }
   ] : []
+  db_env = var.enable_rds ? [
+    { name = "DB_HOST", value = aws_db_instance.postgres[0].address },
+    { name = "DB_USER", value = var.db_username },
+    { name = "DB_NAME", value = var.db_name },
+    { name = "DB_PORT", value = "5432" }
+  ] : []
+  db_secret_env = var.enable_rds ? [
+    { name = "DB_PASSWORD", valueFrom = "${aws_secretsmanager_secret.db[0].arn}:password::" }
+  ] : []
+  kafka_env = var.kafka_bootstrap_servers != "" ? [
+    { name = "KAFKA_BOOTSTRAP_SERVERS", value = var.kafka_bootstrap_servers }
+  ] : []
+  be_backend_kafka_disabled_env = var.kafka_bootstrap_servers == "" ? [
+    { name = "SPRING_AUTOCONFIGURE_EXCLUDE", value = "org.springframework.boot.autoconfigure.kafka.KafkaAutoConfiguration" }
+  ] : []
+  redis_url_env = var.enable_redis ? [
+    { name = "REDIS_URL", value = "redis://${aws_elasticache_cluster.redis[0].cache_nodes[0].address}:6379/0" }
+  ] : []
+
   backend_api_env = concat(
-    var.enable_rds ? [
-      { name = "DB_HOST", value = aws_db_instance.postgres[0].address },
-      { name = "DB_USER", value = var.db_username },
-      { name = "DB_NAME", value = var.db_name },
-      { name = "DB_PORT", value = "5432" }
-    ] : [],
+    local.db_env,
+    local.kafka_env,
     [
       { name = "FRONTEND_URL", value = "https://${aws_cloudfront_distribution.dashboard.domain_name}" },
       { name = "BANK_BACKEND_URL", value = "http://be-backend.ai-native-soc-hackathon.local:8080" },
@@ -178,9 +237,7 @@ locals {
     ]
   )
   backend_api_secret_env = concat(
-    var.enable_rds ? [
-      { name = "DB_PASSWORD", valueFrom = "${aws_secretsmanager_secret.db[0].arn}:password::" }
-    ] : [],
+    local.db_secret_env,
     [
       { name = "JWT_SECRET", valueFrom = "${aws_secretsmanager_secret.backend_app.arn}:jwt_secret::" },
       { name = "AEGIS_INTERNAL_TOKEN", valueFrom = "${aws_secretsmanager_secret.backend_app.arn}:aegis_security_sync_token::" }
@@ -191,9 +248,8 @@ locals {
       { name = "SPRING_DATASOURCE_URL", value = "jdbc:postgresql://${aws_db_instance.postgres[0].address}:5432/${var.db_name}" },
       { name = "SPRING_DATASOURCE_USERNAME", value = var.db_username }
     ] : [],
-    [
-      { name = "KAFKA_BOOTSTRAP_SERVERS", value = "localhost:9094" }
-    ]
+    local.kafka_env,
+    local.be_backend_kafka_disabled_env
   )
   be_backend_secret_env = concat(
     var.enable_rds ? [
@@ -313,6 +369,64 @@ resource "aws_route_table_association" "public" {
 resource "aws_route_table_association" "public_alb_spare" {
   subnet_id      = aws_subnet.public_alb_spare.id
   route_table_id = aws_route_table.public.id
+}
+
+resource "aws_network_acl" "public_edge" {
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = [aws_subnet.public.id, aws_subnet.public_alb_spare.id]
+
+  tags = {
+    Name  = "${local.name_prefix}-public-edge-nacl"
+    Layer = "network-enforcement"
+  }
+}
+
+resource "aws_network_acl_rule" "public_edge_static_block_ingress" {
+  for_each = { for idx, cidr in sort(distinct(var.network_blocked_ipv4_cidrs)) : idx => cidr }
+
+  network_acl_id = aws_network_acl.public_edge.id
+  rule_number    = 100 + tonumber(each.key)
+  egress         = false
+  protocol       = "-1"
+  rule_action    = "deny"
+  cidr_block     = each.value
+  from_port      = 0
+  to_port        = 0
+}
+
+resource "aws_network_acl_rule" "public_edge_static_block_egress" {
+  for_each = { for idx, cidr in sort(distinct(var.network_blocked_ipv4_cidrs)) : idx => cidr }
+
+  network_acl_id = aws_network_acl.public_edge.id
+  rule_number    = 100 + tonumber(each.key)
+  egress         = true
+  protocol       = "-1"
+  rule_action    = "deny"
+  cidr_block     = each.value
+  from_port      = 0
+  to_port        = 0
+}
+
+resource "aws_network_acl_rule" "public_edge_allow_ingress" {
+  network_acl_id = aws_network_acl.public_edge.id
+  rule_number    = 30000
+  egress         = false
+  protocol       = "-1"
+  rule_action    = "allow"
+  cidr_block     = "0.0.0.0/0"
+  from_port      = 0
+  to_port        = 0
+}
+
+resource "aws_network_acl_rule" "public_edge_allow_egress" {
+  network_acl_id = aws_network_acl.public_edge.id
+  rule_number    = 30000
+  egress         = true
+  protocol       = "-1"
+  rule_action    = "allow"
+  cidr_block     = "0.0.0.0/0"
+  from_port      = 0
+  to_port        = 0
 }
 
 resource "aws_eip" "nat" {
@@ -578,6 +692,14 @@ resource "aws_vpc_security_group_ingress_rule" "ecs_from_alb" {
   to_port                      = 8087
 }
 
+resource "aws_vpc_security_group_ingress_rule" "ecs_self" {
+  security_group_id            = aws_security_group.ecs_tasks.id
+  referenced_security_group_id = aws_security_group.ecs_tasks.id
+  from_port                    = 8080
+  ip_protocol                  = "tcp"
+  to_port                      = 8087
+}
+
 resource "aws_vpc_security_group_egress_rule" "ecs_all_egress" {
   security_group_id = aws_security_group.ecs_tasks.id
   cidr_ipv4         = "0.0.0.0/0"
@@ -816,6 +938,41 @@ resource "aws_efs_mount_target" "qdrant" {
   security_groups = [aws_security_group.qdrant_efs[0].id]
 }
 
+resource "aws_wafv2_ip_set" "blocked_ipv4" {
+  name               = "${local.name_prefix}-blocked-ipv4"
+  description        = "Aegis SOAR runtime IPv4 blocklist for public ALB traffic"
+  scope              = "REGIONAL"
+  ip_address_version = "IPV4"
+  addresses          = sort(distinct(var.waf_blocked_ipv4_cidrs))
+
+  lifecycle {
+    ignore_changes = [addresses]
+  }
+
+  tags = {
+    Name  = "${local.name_prefix}-blocked-ipv4"
+    Layer = "application-enforcement"
+  }
+}
+
+resource "aws_wafv2_ip_set" "cloudfront_blocked_ipv4" {
+  provider           = aws.us_east_1
+  name               = "${local.name_prefix}-cloudfront-blocked-ipv4"
+  description        = "Aegis SOAR runtime IPv4 blocklist for CloudFront edge traffic"
+  scope              = "CLOUDFRONT"
+  ip_address_version = "IPV4"
+  addresses          = sort(distinct(var.waf_blocked_ipv4_cidrs))
+
+  lifecycle {
+    ignore_changes = [addresses]
+  }
+
+  tags = {
+    Name  = "${local.name_prefix}-cloudfront-blocked-ipv4"
+    Layer = "edge-enforcement"
+  }
+}
+
 resource "aws_wafv2_web_acl" "alb" {
   name        = "${local.name_prefix}-alb-waf"
   description = "Basic, low-maintenance WAF rules for the public ALB"
@@ -823,6 +980,42 @@ resource "aws_wafv2_web_acl" "alb" {
 
   default_action {
     allow {}
+  }
+
+  rule {
+    name     = "AegisBlockedIPv4Set"
+    priority = 0
+
+    action {
+      block {
+        custom_response {
+          response_code            = 403
+          custom_response_body_key = "aegis_ip_banned"
+
+          response_header {
+            name  = "Cache-Control"
+            value = "no-store, no-cache, max-age=0, must-revalidate"
+          }
+
+          response_header {
+            name  = "X-Aegis-IP-Banned"
+            value = "true"
+          }
+        }
+      }
+    }
+
+    statement {
+      ip_set_reference_statement {
+        arn = aws_wafv2_ip_set.blocked_ipv4.arn
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name_prefix}-blocked-ipv4"
+      sampled_requests_enabled   = true
+    }
   }
 
   rule {
@@ -875,6 +1068,12 @@ resource "aws_wafv2_web_acl" "alb" {
     sampled_requests_enabled   = true
   }
 
+  custom_response_body {
+    key          = "aegis_ip_banned"
+    content      = local.waf_block_response_html
+    content_type = "TEXT_HTML"
+  }
+
   tags = {
     Name = "${local.name_prefix}-alb-waf"
   }
@@ -883,6 +1082,70 @@ resource "aws_wafv2_web_acl" "alb" {
 resource "aws_wafv2_web_acl_association" "alb" {
   resource_arn = aws_lb.app.arn
   web_acl_arn  = aws_wafv2_web_acl.alb.arn
+}
+
+resource "aws_wafv2_web_acl" "cloudfront_edge" {
+  provider    = aws.us_east_1
+  name        = "${local.name_prefix}-cloudfront-edge-waf"
+  description = "Edge WAF blocklist applied before CloudFront cache/origin routing"
+  scope       = "CLOUDFRONT"
+
+  default_action {
+    allow {}
+  }
+
+  rule {
+    name     = "AegisBlockedIPv4Set"
+    priority = 0
+
+    action {
+      block {
+        custom_response {
+          response_code            = 403
+          custom_response_body_key = "aegis_ip_banned"
+
+          response_header {
+            name  = "Cache-Control"
+            value = "no-store, no-cache, max-age=0, must-revalidate"
+          }
+
+          response_header {
+            name  = "X-Aegis-IP-Banned"
+            value = "true"
+          }
+        }
+      }
+    }
+
+    statement {
+      ip_set_reference_statement {
+        arn = aws_wafv2_ip_set.cloudfront_blocked_ipv4.arn
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name_prefix}-cloudfront-blocked-ipv4"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "${local.name_prefix}-cloudfront-edge-waf"
+    sampled_requests_enabled   = true
+  }
+
+  custom_response_body {
+    key          = "aegis_ip_banned"
+    content      = local.waf_block_response_html
+    content_type = "TEXT_HTML"
+  }
+
+  tags = {
+    Name  = "${local.name_prefix}-cloudfront-edge-waf"
+    Layer = "edge-enforcement"
+  }
 }
 
 resource "aws_s3_bucket" "raw_logs" {
@@ -1429,16 +1692,20 @@ data "archive_file" "preprocessor" {
       import boto3
 
       s3 = boto3.client("s3")
+      sqs = boto3.client("sqs")
 
       def _decode(body):
           try:
-              return gzip.decompress(body).decode("utf-8", errors="replace")
+              while body.startswith(b'\x1f\x8b'):
+                  body = gzip.decompress(body)
+              return body.decode("utf-8", errors="replace")
           except Exception:
               return body.decode("utf-8", errors="replace")
 
       def handler(event, context):
           processed = 0
           destination = os.environ["PROCESSED_BUCKET"]
+          queue_url = os.environ.get("EVENT_QUEUE_URL")
 
           for record in event.get("Records", []):
               src_bucket = record["s3"]["bucket"]["name"]
@@ -1452,7 +1719,7 @@ data "archive_file" "preprocessor" {
                   "schema": "ai-native-soc.normalized.v1",
                   "records": [
                       {
-                          "message": raw_text[:200000],
+                          "message": raw_text[:10000000],
                           "pipeline": ["decode", "normalize", "deduplicate", "threat_enrichment"],
                       }
                   ],
@@ -1465,6 +1732,30 @@ data "archive_file" "preprocessor" {
                   Body=json.dumps(normalized).encode("utf-8"),
                   ContentType="application/json",
               )
+
+              if queue_url:
+                  sqs_event = {
+                      "Records": [
+                          {
+                              "s3": {
+                                  "bucket": {
+                                      "name": destination
+                                  },
+                                  "object": {
+                                      "key": dst_key
+                                  }
+                              }
+                          }
+                      ]
+                  }
+                  try:
+                      sqs.send_message(
+                          QueueUrl=queue_url,
+                          MessageBody=json.dumps(sqs_event)
+                      )
+                  except Exception:
+                      pass
+
               processed += 1
 
           return {"processed": processed}
@@ -1654,6 +1945,9 @@ resource "aws_iam_role_policy" "ecs_task" {
           "ssm:GetCommandInvocation",
           "ec2:AuthorizeSecurityGroupIngress",
           "ec2:RevokeSecurityGroupIngress",
+          "ec2:DescribeNetworkAcls",
+          "ec2:CreateNetworkAclEntry",
+          "ec2:DeleteNetworkAclEntry",
           "wafv2:GetIPSet",
           "wafv2:UpdateIPSet",
           "states:StartExecution"
@@ -1891,7 +2185,10 @@ resource "aws_iam_role_policy" "logs_to_firehose" {
           "firehose:PutRecord",
           "firehose:PutRecordBatch"
         ]
-        Resource = aws_kinesis_firehose_delivery_stream.audit.arn
+        Resource = [
+          aws_kinesis_firehose_delivery_stream.audit.arn,
+          aws_kinesis_firehose_delivery_stream.raw_logs.arn
+        ]
       },
       {
         Effect = "Allow"
@@ -2142,7 +2439,7 @@ resource "aws_ecs_task_definition" "service" {
   }
 
   container_definitions = jsonencode([
-    {
+    merge({
       name      = each.key
       image     = lookup(var.container_image_overrides, each.key, "${aws_ecr_repository.service[each.key].repository_url}:latest")
       essential = true
@@ -2165,8 +2462,8 @@ resource "aws_ecs_task_definition" "service" {
         { name = "SNS_TOPIC_ARN", value = aws_sns_topic.alerts.arn },
         { name = "RDS_ENDPOINT", value = var.enable_rds ? aws_db_instance.postgres[0].address : "" },
         { name = "REDIS_ENDPOINT", value = var.enable_redis ? aws_elasticache_cluster.redis[0].cache_nodes[0].address : "" }
-      ], each.key == "backend-api" ? local.backend_api_env : (each.key == "be-backend" ? local.be_backend_env : (each.key == "fe-web" ? local.fe_web_env : [])), local.layer_artifact_env, local.vector_db_env, local.llm_env)
-      secrets = concat(local.llm_secret_env, var.telegram_bot_token != "" ? [{ name = "TELEGRAM_BOT_TOKEN", valueFrom = "${aws_secretsmanager_secret.external_connectors.arn}:telegram_bot_token::" }] : [], each.key == "backend-api" ? local.backend_api_secret_env : (each.key == "be-backend" ? local.be_backend_secret_env : []), each.key == "orchestrator-ha" || each.key == "worker-service" ? [{ name = "AEGIS_INTERNAL_TOKEN", valueFrom = "${aws_secretsmanager_secret.backend_app.arn}:aegis_security_sync_token::" }] : [])
+      ], each.key == "backend-api" ? local.backend_api_env : (each.key == "be-backend" ? local.be_backend_env : (each.key == "fe-web" ? local.fe_web_env : [])), contains(["backend-api", "orchestrator-ha", "worker-service"], each.key) ? local.waf_blocklist_env : [], contains(["orchestrator-ha", "worker-service"], each.key) ? local.db_env : [], contains(["orchestrator-ha", "worker-service"], each.key) ? local.redis_url_env : [], local.layer_artifact_env, local.vector_db_env, local.llm_env)
+      secrets = concat(local.llm_secret_env, var.telegram_bot_token != "" ? [{ name = "TELEGRAM_BOT_TOKEN", valueFrom = "${aws_secretsmanager_secret.external_connectors.arn}:telegram_bot_token::" }] : [], each.key == "backend-api" ? local.backend_api_secret_env : (each.key == "be-backend" ? local.be_backend_secret_env : []), contains(["orchestrator-ha", "worker-service"], each.key) ? local.db_secret_env : [], each.key == "orchestrator-ha" || each.key == "worker-service" ? [{ name = "AEGIS_INTERNAL_TOKEN", valueFrom = "${aws_secretsmanager_secret.backend_app.arn}:aegis_security_sync_token::" }] : [])
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -2175,7 +2472,10 @@ resource "aws_ecs_task_definition" "service" {
           awslogs-stream-prefix = "ecs"
         }
       }
-    }
+      }, each.key == "worker-service" ? {
+      entryPoint = ["python"]
+      command    = ["action_worker.py"]
+    } : {})
   ])
 
   tags = {
@@ -2336,12 +2636,12 @@ resource "aws_ecs_service" "qdrant" {
 resource "aws_ecs_service" "service" {
   for_each = local.ecs_services
 
-  name                   = each.key
-  cluster                = aws_ecs_cluster.main.id
-  task_definition        = aws_ecs_task_definition.service[each.key].arn
-  desired_count          = each.value.desired_count
-  enable_execute_command = true
-  wait_for_steady_state  = false
+  name                              = each.key
+  cluster                           = aws_ecs_cluster.main.id
+  task_definition                   = aws_ecs_task_definition.service[each.key].arn
+  desired_count                     = each.value.desired_count
+  enable_execute_command            = true
+  wait_for_steady_state             = false
   health_check_grace_period_seconds = each.key == "be-backend" || each.key == "fe-web" || each.key == "backend-api" ? 180 : 0
 
   deployment_minimum_healthy_percent = each.value.desired_count > 1 ? 50 : 0
@@ -2588,10 +2888,11 @@ EOF
 }
 
 resource "aws_cloudfront_distribution" "dashboard" {
-  enabled             = true
-  comment             = "${local.name_prefix} SOC dashboard"
-  price_class         = var.cloudfront_price_class
-  aliases             = ["littleboys.biz", "www.littleboys.biz"]
+  enabled     = true
+  comment     = "${local.name_prefix} SOC dashboard"
+  price_class = var.cloudfront_price_class
+  aliases     = var.use_custom_domain ? ["littleboys.biz", "www.littleboys.biz"] : []
+  web_acl_id  = aws_wafv2_web_acl.cloudfront_edge.arn
 
   origin {
     domain_name              = aws_s3_bucket.dashboard.bucket_regional_domain_name
@@ -2604,10 +2905,10 @@ resource "aws_cloudfront_distribution" "dashboard" {
     origin_id   = "backend-alb"
 
     custom_origin_config {
-      http_port                = 80
-      https_port               = 443
-      origin_protocol_policy   = "http-only"
-      origin_ssl_protocols     = ["TLSv1.2"]
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "http-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
     }
   }
 
@@ -2685,9 +2986,10 @@ resource "aws_cloudfront_distribution" "dashboard" {
   }
 
   viewer_certificate {
-    acm_certificate_arn      = aws_acm_certificate_validation.cert.certificate_arn
-    ssl_support_method       = "sni-only"
-    minimum_protocol_version = "TLSv1.2_2021"
+    acm_certificate_arn            = var.use_custom_domain ? aws_acm_certificate_validation.cert[0].certificate_arn : null
+    ssl_support_method             = var.use_custom_domain ? "sni-only" : null
+    minimum_protocol_version       = var.use_custom_domain ? "TLSv1.2_2021" : null
+    cloudfront_default_certificate = !var.use_custom_domain
   }
 
   tags = {
@@ -2709,7 +3011,7 @@ data "aws_iam_policy_document" "dashboard_bucket" {
     condition {
       test     = "StringEquals"
       variable = "AWS:SourceArn"
-      values   = [
+      values = [
         aws_cloudfront_distribution.dashboard.arn,
         aws_cloudfront_distribution.soc.arn
       ]
@@ -2838,7 +3140,7 @@ resource "aws_cloudwatch_log_subscription_filter" "ecs_to_audit" {
   name            = "to-audit-firehose"
   log_group_name  = each.value.name
   filter_pattern  = ""
-  destination_arn = aws_kinesis_firehose_delivery_stream.audit.arn
+  destination_arn = aws_kinesis_firehose_delivery_stream.raw_logs.arn
   role_arn        = aws_iam_role.logs_to_firehose.arn
   distribution    = "ByLogStream"
 
@@ -2960,10 +3262,12 @@ resource "aws_iam_role_policy" "github_actions" {
 
 # Custom Domain Route 53 & ACM Resources
 resource "aws_route53_zone" "littleboys_biz" {
-  name = "littleboys.biz"
+  count = var.use_custom_domain ? 1 : 0
+  name  = "littleboys.biz"
 }
 
 resource "aws_acm_certificate" "cert" {
+  count             = var.use_custom_domain ? 1 : 0
   provider          = aws.us_east_1
   domain_name       = "littleboys.biz"
   validation_method = "DNS"
@@ -2978,33 +3282,34 @@ resource "aws_acm_certificate" "cert" {
 }
 
 resource "aws_route53_record" "cert_validation" {
-  for_each = {
-    for dvo in aws_acm_certificate.cert.domain_validation_options : dvo.domain_name => {
+  for_each = var.use_custom_domain ? {
+    for dvo in aws_acm_certificate.cert[0].domain_validation_options : dvo.domain_name => {
       name   = dvo.resource_record_name
       record = dvo.resource_record_value
       type   = dvo.resource_record_type
     }
-  }
+  } : {}
 
   allow_overwrite = true
   name            = each.value.name
   records         = [each.value.record]
   ttl             = 60
   type            = each.value.type
-  zone_id         = aws_route53_zone.littleboys_biz.zone_id
+  zone_id         = aws_route53_zone.littleboys_biz[0].zone_id
 }
 
 resource "aws_acm_certificate_validation" "cert" {
+  count                   = var.use_custom_domain ? 1 : 0
   provider                = aws.us_east_1
-  certificate_arn         = aws_acm_certificate.cert.arn
+  certificate_arn         = aws_acm_certificate.cert[0].arn
   validation_record_fqdns = [for record in aws_route53_record.cert_validation : record.fqdn]
 }
 
 resource "aws_cloudfront_distribution" "soc" {
-  enabled             = true
-  comment             = "${local.name_prefix} SOC subdomain dashboard"
-  price_class         = var.cloudfront_price_class
-  aliases             = ["soc.littleboys.biz"]
+  enabled     = true
+  comment     = "${local.name_prefix} SOC subdomain dashboard"
+  price_class = var.cloudfront_price_class
+  aliases     = var.use_custom_domain ? ["soc.littleboys.biz"] : []
 
   origin {
     domain_name              = aws_s3_bucket.dashboard.bucket_regional_domain_name
@@ -3016,11 +3321,16 @@ resource "aws_cloudfront_distribution" "soc" {
     domain_name = aws_lb.app.dns_name
     origin_id   = "backend-alb"
 
+    custom_header {
+      name  = "X-Aegis-Surface"
+      value = "soc-console"
+    }
+
     custom_origin_config {
-      http_port                = 80
-      https_port               = 443
-      origin_protocol_policy   = "http-only"
-      origin_ssl_protocols     = ["TLSv1.2"]
+      http_port              = 80
+      https_port             = 443
+      origin_protocol_policy = "http-only"
+      origin_ssl_protocols   = ["TLSv1.2"]
     }
   }
 
@@ -3077,9 +3387,10 @@ resource "aws_cloudfront_distribution" "soc" {
   }
 
   viewer_certificate {
-    acm_certificate_arn      = aws_acm_certificate_validation.cert.certificate_arn
-    ssl_support_method       = "sni-only"
-    minimum_protocol_version = "TLSv1.2_2021"
+    acm_certificate_arn            = var.use_custom_domain ? aws_acm_certificate_validation.cert[0].certificate_arn : null
+    ssl_support_method             = var.use_custom_domain ? "sni-only" : null
+    minimum_protocol_version       = var.use_custom_domain ? "TLSv1.2_2021" : null
+    cloudfront_default_certificate = !var.use_custom_domain
   }
 
   tags = {
@@ -3089,7 +3400,8 @@ resource "aws_cloudfront_distribution" "soc" {
 }
 
 resource "aws_route53_record" "bank_ipv4" {
-  zone_id = aws_route53_zone.littleboys_biz.zone_id
+  count = var.use_custom_domain ? 1 : 0
+  zone_id = var.use_custom_domain ? aws_route53_zone.littleboys_biz[0].zone_id : null
   name    = "littleboys.biz"
   type    = "A"
 
@@ -3101,7 +3413,8 @@ resource "aws_route53_record" "bank_ipv4" {
 }
 
 resource "aws_route53_record" "bank_ipv6" {
-  zone_id = aws_route53_zone.littleboys_biz.zone_id
+  count = var.use_custom_domain ? 1 : 0
+  zone_id = var.use_custom_domain ? aws_route53_zone.littleboys_biz[0].zone_id : null
   name    = "littleboys.biz"
   type    = "AAAA"
 
@@ -3113,7 +3426,8 @@ resource "aws_route53_record" "bank_ipv6" {
 }
 
 resource "aws_route53_record" "bank_www_ipv4" {
-  zone_id = aws_route53_zone.littleboys_biz.zone_id
+  count = var.use_custom_domain ? 1 : 0
+  zone_id = var.use_custom_domain ? aws_route53_zone.littleboys_biz[0].zone_id : null
   name    = "www.littleboys.biz"
   type    = "A"
 
@@ -3125,7 +3439,8 @@ resource "aws_route53_record" "bank_www_ipv4" {
 }
 
 resource "aws_route53_record" "bank_www_ipv6" {
-  zone_id = aws_route53_zone.littleboys_biz.zone_id
+  count = var.use_custom_domain ? 1 : 0
+  zone_id = var.use_custom_domain ? aws_route53_zone.littleboys_biz[0].zone_id : null
   name    = "www.littleboys.biz"
   type    = "AAAA"
 
@@ -3137,7 +3452,8 @@ resource "aws_route53_record" "bank_www_ipv6" {
 }
 
 resource "aws_route53_record" "soc_ipv4" {
-  zone_id = aws_route53_zone.littleboys_biz.zone_id
+  count = var.use_custom_domain ? 1 : 0
+  zone_id = var.use_custom_domain ? aws_route53_zone.littleboys_biz[0].zone_id : null
   name    = "soc.littleboys.biz"
   type    = "A"
 
@@ -3149,7 +3465,8 @@ resource "aws_route53_record" "soc_ipv4" {
 }
 
 resource "aws_route53_record" "soc_ipv6" {
-  zone_id = aws_route53_zone.littleboys_biz.zone_id
+  count = var.use_custom_domain ? 1 : 0
+  zone_id = var.use_custom_domain ? aws_route53_zone.littleboys_biz[0].zone_id : null
   name    = "soc.littleboys.biz"
   type    = "AAAA"
 
@@ -3161,7 +3478,8 @@ resource "aws_route53_record" "soc_ipv6" {
 }
 
 resource "aws_route53_record" "google_mx" {
-  zone_id = aws_route53_zone.littleboys_biz.zone_id
+  count = var.use_custom_domain ? 1 : 0
+  zone_id = var.use_custom_domain ? aws_route53_zone.littleboys_biz[0].zone_id : null
   name    = ""
   type    = "MX"
   ttl     = 3600
@@ -3171,7 +3489,8 @@ resource "aws_route53_record" "google_mx" {
 }
 
 resource "aws_route53_record" "google_spf" {
-  zone_id = aws_route53_zone.littleboys_biz.zone_id
+  count = var.use_custom_domain ? 1 : 0
+  zone_id = var.use_custom_domain ? aws_route53_zone.littleboys_biz[0].zone_id : null
   name    = ""
   type    = "TXT"
   ttl     = 3600
@@ -3181,7 +3500,8 @@ resource "aws_route53_record" "google_spf" {
 }
 
 resource "aws_route53_record" "google_dkim" {
-  zone_id = aws_route53_zone.littleboys_biz.zone_id
+  count = var.use_custom_domain ? 1 : 0
+  zone_id = var.use_custom_domain ? aws_route53_zone.littleboys_biz[0].zone_id : null
   name    = "google._domainkey"
   type    = "TXT"
   ttl     = 3600

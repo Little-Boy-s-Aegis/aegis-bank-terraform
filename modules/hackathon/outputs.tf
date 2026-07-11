@@ -18,6 +18,36 @@ output "alb_dns_name" {
   value       = aws_lb.app.dns_name
 }
 
+output "waf_blocked_ipv4_ip_set_name" {
+  description = "Regional WAF IP set name used by SOAR to block attacker IPv4 CIDRs."
+  value       = aws_wafv2_ip_set.blocked_ipv4.name
+}
+
+output "waf_blocked_ipv4_ip_set_id" {
+  description = "Regional WAF IP set ID used by SOAR to block attacker IPv4 CIDRs."
+  value       = aws_wafv2_ip_set.blocked_ipv4.id
+}
+
+output "waf_blocked_ipv4_ip_set_arn" {
+  description = "Regional WAF IP set ARN used by the ALB Web ACL."
+  value       = aws_wafv2_ip_set.blocked_ipv4.arn
+}
+
+output "cloudfront_waf_blocked_ipv4_ip_set_name" {
+  description = "CloudFront WAF IP set name used by SOAR to block attacker IPv4 CIDRs at the edge."
+  value       = aws_wafv2_ip_set.cloudfront_blocked_ipv4.name
+}
+
+output "cloudfront_waf_blocked_ipv4_ip_set_id" {
+  description = "CloudFront WAF IP set ID used by SOAR to block attacker IPv4 CIDRs at the edge."
+  value       = aws_wafv2_ip_set.cloudfront_blocked_ipv4.id
+}
+
+output "cloudfront_waf_blocked_ipv4_ip_set_arn" {
+  description = "CloudFront WAF IP set ARN used by the edge Web ACL."
+  value       = aws_wafv2_ip_set.cloudfront_blocked_ipv4.arn
+}
+
 output "app_cloudfront_url" {
   description = "Production-only CloudFront URL in front of the application ALB."
   value       = null
@@ -181,5 +211,6 @@ output "cost_controls" {
 
 output "route53_name_servers" {
   description = "Name servers for Route 53 zone."
-  value       = aws_route53_zone.littleboys_biz.name_servers
+  value       = var.use_custom_domain ? aws_route53_zone.littleboys_biz[0].name_servers : []
 }
+

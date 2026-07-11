@@ -14,6 +14,8 @@ module "hackathon" {
   alb_spare_subnet_cidr          = var.alb_spare_subnet_cidr
   data_spare_subnet_cidr         = var.data_spare_subnet_cidr
   allowed_http_cidr_blocks       = var.allowed_http_cidr_blocks
+  waf_blocked_ipv4_cidrs         = var.waf_blocked_ipv4_cidrs
+  network_blocked_ipv4_cidrs     = var.network_blocked_ipv4_cidrs
   enable_interface_endpoints     = var.enable_interface_endpoints
   enable_nat_gateway             = var.enable_nat_gateway
   interface_endpoint_services    = var.interface_endpoint_services
@@ -31,6 +33,7 @@ module "hackathon" {
   use_fargate_spot               = var.use_fargate_spot
   enable_ecs_container_insights  = var.enable_ecs_container_insights
   container_image_overrides      = var.container_image_overrides
+  kafka_bootstrap_servers        = var.kafka_bootstrap_servers
   layer1_artifacts_path          = var.layer1_artifacts_path
   layer2_artifacts_path          = var.layer2_artifacts_path
   dashscope_api_key              = var.dashscope_api_key
@@ -78,6 +81,7 @@ module "hackathon" {
   github_owner                   = var.github_owner
   github_repository              = var.github_repository
   github_oidc_thumbprints        = var.github_oidc_thumbprints
+  use_custom_domain              = var.use_custom_domain
 
   providers = {
     aws           = aws

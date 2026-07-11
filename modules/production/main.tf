@@ -1723,7 +1723,7 @@ data "archive_file" "preprocessor" {
                   "source_key": source_key,
                   "pipeline": ["decode", "deobfuscate", "deduplicate", "normalize", "parse", "threat_enrichment"],
                   "ingested_at_epoch": int(time.time()),
-                  "message": message[:200000],
+                  "message": message[:10000000],
               }
 
               dst_key = f"processed/{source_key}.json"

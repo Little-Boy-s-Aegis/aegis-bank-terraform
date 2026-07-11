@@ -22,6 +22,36 @@ output "alb_dns_name" {
   value       = local.active_profile.alb_dns_name
 }
 
+output "waf_blocked_ipv4_ip_set_name" {
+  description = "Regional WAF IP set name used by SOAR to block attacker IPv4 CIDRs."
+  value       = var.deployment_profile == "hackathon" ? module.hackathon[0].waf_blocked_ipv4_ip_set_name : null
+}
+
+output "waf_blocked_ipv4_ip_set_id" {
+  description = "Regional WAF IP set ID used by SOAR to block attacker IPv4 CIDRs."
+  value       = var.deployment_profile == "hackathon" ? module.hackathon[0].waf_blocked_ipv4_ip_set_id : null
+}
+
+output "waf_blocked_ipv4_ip_set_arn" {
+  description = "Regional WAF IP set ARN used by the ALB Web ACL."
+  value       = var.deployment_profile == "hackathon" ? module.hackathon[0].waf_blocked_ipv4_ip_set_arn : null
+}
+
+output "cloudfront_waf_blocked_ipv4_ip_set_name" {
+  description = "CloudFront WAF IP set name used by SOAR to block attacker IPv4 CIDRs at the edge."
+  value       = var.deployment_profile == "hackathon" ? module.hackathon[0].cloudfront_waf_blocked_ipv4_ip_set_name : null
+}
+
+output "cloudfront_waf_blocked_ipv4_ip_set_id" {
+  description = "CloudFront WAF IP set ID used by SOAR to block attacker IPv4 CIDRs at the edge."
+  value       = var.deployment_profile == "hackathon" ? module.hackathon[0].cloudfront_waf_blocked_ipv4_ip_set_id : null
+}
+
+output "cloudfront_waf_blocked_ipv4_ip_set_arn" {
+  description = "CloudFront WAF IP set ARN used by the edge Web ACL."
+  value       = var.deployment_profile == "hackathon" ? module.hackathon[0].cloudfront_waf_blocked_ipv4_ip_set_arn : null
+}
+
 output "app_cloudfront_url" {
   description = "Production CloudFront URL in front of the application ALB, if the selected profile creates one."
   value       = local.active_profile.app_cloudfront_url
