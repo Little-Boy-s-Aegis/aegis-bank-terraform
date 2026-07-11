@@ -211,6 +211,5 @@ output "cost_controls" {
 
 output "route53_name_servers" {
   description = "Name servers for Route 53 zone."
-  value       = var.use_custom_domain ? aws_route53_zone.littleboys_biz[0].name_servers : []
+  value       = local.custom_domain_name_servers
 }
-

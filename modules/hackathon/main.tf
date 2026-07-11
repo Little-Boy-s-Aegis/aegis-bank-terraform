@@ -2433,6 +2433,10 @@ resource "aws_ecs_task_definition" "service" {
   execution_role_arn       = aws_iam_role.ecs_execution.arn
   task_role_arn            = aws_iam_role.ecs_task.arn
 
+  ephemeral_storage {
+    size_in_gib = 50
+  }
+
   runtime_platform {
     operating_system_family = "LINUX"
     cpu_architecture        = var.ecs_cpu_architecture
@@ -3261,8 +3265,29 @@ resource "aws_iam_role_policy" "github_actions" {
 }
 
 # Custom Domain Route 53 & ACM Resources
+data "aws_route53_zone" "custom_domain" {
+  count = var.use_custom_domain && var.route53_zone_id != "" ? 1 : 0
+
+  zone_id      = var.route53_zone_id
+  private_zone = false
+}
+
+locals {
+  custom_domain_zone_id = var.use_custom_domain ? (
+    var.route53_zone_id != ""
+    ? data.aws_route53_zone.custom_domain[0].zone_id
+    : aws_route53_zone.littleboys_biz[0].zone_id
+  ) : null
+
+  custom_domain_name_servers = var.use_custom_domain ? (
+    var.route53_zone_id != ""
+    ? data.aws_route53_zone.custom_domain[0].name_servers
+    : aws_route53_zone.littleboys_biz[0].name_servers
+  ) : []
+}
+
 resource "aws_route53_zone" "littleboys_biz" {
-  count = var.use_custom_domain ? 1 : 0
+  count = var.use_custom_domain && var.route53_zone_id == "" ? 1 : 0
   name  = "littleboys.biz"
 }
 
@@ -3295,7 +3320,7 @@ resource "aws_route53_record" "cert_validation" {
   records         = [each.value.record]
   ttl             = 60
   type            = each.value.type
-  zone_id         = aws_route53_zone.littleboys_biz[0].zone_id
+  zone_id         = local.custom_domain_zone_id
 }
 
 resource "aws_acm_certificate_validation" "cert" {
@@ -3400,8 +3425,8 @@ resource "aws_cloudfront_distribution" "soc" {
 }
 
 resource "aws_route53_record" "bank_ipv4" {
-  count = var.use_custom_domain ? 1 : 0
-  zone_id = var.use_custom_domain ? aws_route53_zone.littleboys_biz[0].zone_id : null
+  count   = var.use_custom_domain ? 1 : 0
+  zone_id = local.custom_domain_zone_id
   name    = "littleboys.biz"
   type    = "A"
 
@@ -3413,8 +3438,8 @@ resource "aws_route53_record" "bank_ipv4" {
 }
 
 resource "aws_route53_record" "bank_ipv6" {
-  count = var.use_custom_domain ? 1 : 0
-  zone_id = var.use_custom_domain ? aws_route53_zone.littleboys_biz[0].zone_id : null
+  count   = var.use_custom_domain ? 1 : 0
+  zone_id = local.custom_domain_zone_id
   name    = "littleboys.biz"
   type    = "AAAA"
 
@@ -3426,8 +3451,8 @@ resource "aws_route53_record" "bank_ipv6" {
 }
 
 resource "aws_route53_record" "bank_www_ipv4" {
-  count = var.use_custom_domain ? 1 : 0
-  zone_id = var.use_custom_domain ? aws_route53_zone.littleboys_biz[0].zone_id : null
+  count   = var.use_custom_domain ? 1 : 0
+  zone_id = local.custom_domain_zone_id
   name    = "www.littleboys.biz"
   type    = "A"
 
@@ -3439,8 +3464,8 @@ resource "aws_route53_record" "bank_www_ipv4" {
 }
 
 resource "aws_route53_record" "bank_www_ipv6" {
-  count = var.use_custom_domain ? 1 : 0
-  zone_id = var.use_custom_domain ? aws_route53_zone.littleboys_biz[0].zone_id : null
+  count   = var.use_custom_domain ? 1 : 0
+  zone_id = local.custom_domain_zone_id
   name    = "www.littleboys.biz"
   type    = "AAAA"
 
@@ -3452,8 +3477,8 @@ resource "aws_route53_record" "bank_www_ipv6" {
 }
 
 resource "aws_route53_record" "soc_ipv4" {
-  count = var.use_custom_domain ? 1 : 0
-  zone_id = var.use_custom_domain ? aws_route53_zone.littleboys_biz[0].zone_id : null
+  count   = var.use_custom_domain ? 1 : 0
+  zone_id = local.custom_domain_zone_id
   name    = "soc.littleboys.biz"
   type    = "A"
 
@@ -3465,8 +3490,8 @@ resource "aws_route53_record" "soc_ipv4" {
 }
 
 resource "aws_route53_record" "soc_ipv6" {
-  count = var.use_custom_domain ? 1 : 0
-  zone_id = var.use_custom_domain ? aws_route53_zone.littleboys_biz[0].zone_id : null
+  count   = var.use_custom_domain ? 1 : 0
+  zone_id = local.custom_domain_zone_id
   name    = "soc.littleboys.biz"
   type    = "AAAA"
 
@@ -3478,8 +3503,8 @@ resource "aws_route53_record" "soc_ipv6" {
 }
 
 resource "aws_route53_record" "google_mx" {
-  count = var.use_custom_domain ? 1 : 0
-  zone_id = var.use_custom_domain ? aws_route53_zone.littleboys_biz[0].zone_id : null
+  count   = var.use_custom_domain ? 1 : 0
+  zone_id = local.custom_domain_zone_id
   name    = ""
   type    = "MX"
   ttl     = 3600
@@ -3489,8 +3514,8 @@ resource "aws_route53_record" "google_mx" {
 }
 
 resource "aws_route53_record" "google_spf" {
-  count = var.use_custom_domain ? 1 : 0
-  zone_id = var.use_custom_domain ? aws_route53_zone.littleboys_biz[0].zone_id : null
+  count   = var.use_custom_domain ? 1 : 0
+  zone_id = local.custom_domain_zone_id
   name    = ""
   type    = "TXT"
   ttl     = 3600
@@ -3500,8 +3525,8 @@ resource "aws_route53_record" "google_spf" {
 }
 
 resource "aws_route53_record" "google_dkim" {
-  count = var.use_custom_domain ? 1 : 0
-  zone_id = var.use_custom_domain ? aws_route53_zone.littleboys_biz[0].zone_id : null
+  count   = var.use_custom_domain ? 1 : 0
+  zone_id = local.custom_domain_zone_id
   name    = "google._domainkey"
   type    = "TXT"
   ttl     = 3600

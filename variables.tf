@@ -4,6 +4,12 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
+variable "aws_profile" {
+  description = "Optional local AWS CLI profile to use for all Terraform AWS providers."
+  type        = string
+  default     = null
+}
+
 variable "project_name" {
   description = "Project name used in resource names."
   type        = string
@@ -553,5 +559,23 @@ variable "use_custom_domain" {
   description = "Configure custom domains (Route53, ACM certs) for CloudFront. Set to false to use default CloudFront domains for fast automated setup."
   type        = bool
   default     = false
+}
+
+variable "ecs_autoscaling_max_capacity" {
+  description = "Maximum number of tasks the ECS service can scale up to."
+  type        = number
+  default     = 10
+}
+
+variable "ecs_autoscaling_cpu_threshold" {
+  description = "Target average CPU utilization percentage for ECS auto scaling."
+  type        = number
+  default     = 70.0
+}
+
+variable "ecs_autoscaling_memory_threshold" {
+  description = "Target average Memory utilization percentage for ECS auto scaling."
+  type        = number
+  default     = 80.0
 }
 

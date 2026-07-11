@@ -1,4 +1,5 @@
 aws_region         = "ap-southeast-1"
+aws_profile        = "aegis-hackathon"
 project_name       = "ai-native-soc"
 environment        = "hackathon"
 deployment_profile = "hackathon"
@@ -24,3 +25,4 @@ container_image_overrides = {}
 # the WAF IP set dynamically; this seeds the current emergency edge block at deploy.
 waf_blocked_ipv4_cidrs     = ["42.114.204.232/32"]
 network_blocked_ipv4_cidrs = []
+use_custom_domain          = true

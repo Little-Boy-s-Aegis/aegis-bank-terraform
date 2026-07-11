@@ -490,3 +490,24 @@ variable "use_custom_domain" {
   default     = false
 }
 
+variable "route53_zone_id" {
+  description = "Optional existing Route53 hosted zone ID for littleboys.biz. Leave empty to let this module create a hosted zone."
+  type        = string
+  default     = ""
+}
+
+variable "ecs_autoscaling_max_capacity" {
+  description = "Maximum number of tasks the ECS service can scale up to."
+  type        = number
+}
+
+variable "ecs_autoscaling_cpu_threshold" {
+  description = "Target average CPU utilization percentage for ECS auto scaling."
+  type        = number
+}
+
+variable "ecs_autoscaling_memory_threshold" {
+  description = "Target average Memory utilization percentage for ECS auto scaling."
+  type        = number
+}
+

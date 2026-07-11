@@ -23,7 +23,7 @@ log_retention_days    = 14
 
 allowed_http_cidr_blocks = ["0.0.0.0/0"]
 sns_email_subscriptions  = ["voduchieu42@gmail.com"]
-telegram_bot_token       = "8667720063:AAF4M0vpuoVECb5Kv5qeesvPBVTVvErkfDQ"
+telegram_bot_token       = ""
 telegram_chat_id         = "1628206759"
 
 llm_provider                 = "bedrock"
