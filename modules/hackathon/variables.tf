@@ -205,6 +205,12 @@ variable "layer2_artifacts_path" {
   default     = "../agent-layer-2"
 }
 
+variable "dashboard_build_path" {
+  description = "Path, relative to the Terraform root, containing the built Vite SOC dashboard assets."
+  type        = string
+  default     = "../dashboard/frontend/dist"
+}
+
 variable "dashscope_api_key" {
   description = "Optional DashScope API key for Qwen, stored in Secrets Manager and injected into ECS as DASHSCOPE_API_KEY."
   type        = string
@@ -510,4 +516,3 @@ variable "ecs_autoscaling_memory_threshold" {
   description = "Target average Memory utilization percentage for ECS auto scaling."
   type        = number
 }
-

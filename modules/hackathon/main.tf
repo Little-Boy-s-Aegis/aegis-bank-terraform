@@ -1006,8 +1006,31 @@ resource "aws_wafv2_web_acl" "alb" {
     }
 
     statement {
-      ip_set_reference_statement {
-        arn = aws_wafv2_ip_set.blocked_ipv4.arn
+      and_statement {
+        statement {
+          ip_set_reference_statement {
+            arn = aws_wafv2_ip_set.blocked_ipv4.arn
+          }
+        }
+        statement {
+          not_statement {
+            statement {
+              byte_match_statement {
+                field_to_match {
+                  single_header {
+                    name = "x-aegis-surface"
+                  }
+                }
+                positional_constraint = "EXACTLY"
+                search_string         = "soc-console"
+                text_transformation {
+                  priority = 0
+                  type     = "NONE"
+                }
+              }
+            }
+          }
+        }
       }
     }
 

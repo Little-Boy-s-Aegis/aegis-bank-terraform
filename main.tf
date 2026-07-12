@@ -36,6 +36,7 @@ module "hackathon" {
   kafka_bootstrap_servers          = var.kafka_bootstrap_servers
   layer1_artifacts_path            = var.layer1_artifacts_path
   layer2_artifacts_path            = var.layer2_artifacts_path
+  dashboard_build_path             = var.dashboard_build_path
   dashscope_api_key                = var.dashscope_api_key
   qwen_model_name                  = var.qwen_model_name
   qwen_base_url                    = var.qwen_base_url
