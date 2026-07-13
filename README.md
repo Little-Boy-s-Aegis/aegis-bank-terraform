@@ -1,5 +1,7 @@
 # AI-Native SOC Terraform
 
+> Part of the [Little Boy's Aegis](https://github.com/Little-Boy-s-Aegis) project -- an AI-native Security Operations Center platform.
+
 This repository contains two separate Terraform implementations for the AI-Native SOC Platform:
 
 - `hackathon`: cost-optimized MVP, single-AZ workload placement, serverless-first, low monthly cost.
@@ -334,3 +336,17 @@ Hackathon service keys:
 ## Secrets
 
 Do not put real DashScope, Telegram, Slack, Jira, or ServiceNow tokens into committed tfvars files. Use a local ignored tfvars file, CI/CD secret injection, or pre-created Secrets Manager values depending on your deployment process. Bedrock uses the ECS task role and does not require a committed API key.
+
+## Related Repositories
+
+| Repository | Description |
+|---|---|
+| [aegis-bank-deployment](https://github.com/Little-Boy-s-Aegis/aegis-bank-deployment) | Docker Compose orchestration for the full platform |
+| [aegis-bank-backend](https://github.com/Little-Boy-s-Aegis/aegis-bank-backend) | Spring Boot banking API |
+| [aegis-bank-web-client](https://github.com/Little-Boy-s-Aegis/aegis-bank-web-client) | Next.js banking web portal |
+| [aegis-bank-mobile-app](https://github.com/Little-Boy-s-Aegis/aegis-bank-mobile-app) | Flutter mobile banking app |
+| [dashboard](https://github.com/Little-Boy-s-Aegis/dashboard) | SOC Dashboard -- Go backend + React frontend |
+| [agent-layer-1](https://github.com/Little-Boy-s-Aegis/agent-layer-1) | AI Sensor Agents |
+| [agent-layer-2](https://github.com/Little-Boy-s-Aegis/agent-layer-2) | Meta Analyzer / SOAR Orchestrator prompts |
+| [aegis-soar-engine](https://github.com/Little-Boy-s-Aegis/aegis-soar-engine) | SOAR Decision Engine |
+| [aegis-staging-sandbox](https://github.com/Little-Boy-s-Aegis/aegis-staging-sandbox) | Staging Sandbox environment |
