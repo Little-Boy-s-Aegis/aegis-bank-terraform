@@ -9,6 +9,33 @@ This repository contains two separate Terraform implementations for the AI-Nativ
 
 Select the stack with `deployment_profile`.
 
+## Prerequisites
+
+- Terraform `>= 1.5.0`
+- AWS CLI credentials for the target account
+- Permission to create IAM, networking, ECS, RDS, CloudFront, WAF, KMS,
+  observability, and data services used by the selected profile
+- A reviewed remote-state backend for shared or long-lived environments
+
+The providers are pinned through `.terraform.lock.hcl`. Run `terraform init
+-upgrade` only as a deliberate dependency update and review the resulting lock
+file diff.
+
+## Quick Start
+
+```bash
+aws sts get-caller-identity
+terraform init
+terraform fmt -check -recursive
+terraform validate
+terraform plan -var-file=environments/hackathon/terraform.tfvars -out=tfplan.local
+terraform apply tfplan.local
+```
+
+Use `environments/production/terraform.tfvars` for the production profile.
+Always inspect the plan for replacements, public exposure, IAM broadening, and
+costly services before applying it.
+
 ## Folder Layout
 
 ```text
@@ -336,6 +363,26 @@ Hackathon service keys:
 ## Secrets
 
 Do not put real DashScope, Telegram, Slack, Jira, or ServiceNow tokens into committed tfvars files. Use a local ignored tfvars file, CI/CD secret injection, or pre-created Secrets Manager values depending on your deployment process. Bedrock uses the ECS task role and does not require a committed API key.
+
+## Validation and Operations
+
+```bash
+terraform fmt -check -recursive
+terraform validate
+terraform plan -var-file=environments/hackathon/terraform.tfvars
+terraform output
+```
+
+- Keep state files and local plan artifacts out of source control; plans may
+  contain sensitive values even when the terminal marks them as sensitive.
+- Use separate state per environment and enable locking, encryption, and state
+  versioning for team deployments.
+- Review `terraform plan -refresh-only` before reconciling drift.
+- Destroy only with the same variable file and workspace used to create the
+  stack: `terraform destroy -var-file=environments/hackathon/terraform.tfvars`.
+  Destruction can permanently remove databases, buckets, and audit data.
+- `force_destroy_buckets` defaults to a hackathon-friendly value; override it
+  for retained environments.
 
 ## Related Repositories
 
