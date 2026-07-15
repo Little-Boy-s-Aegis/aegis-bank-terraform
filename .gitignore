@@ -12,9 +12,17 @@ crash.*.log
 # Sensitive variables
 *.tfvars
 *.tfvars.json
-!terraform.tfvars
-!environments/*/terraform.tfvars
 !*.tfvars.example
+!**/*.tfvars.example
+
+# Local plan and apply output
+tfplan
+tfplan-*
+*.tfplan
+*.tfplan.*
+destroy-apply.*
+*.log
+*.pid
 
 # Account-specific backend config
 backend/backend.hcl
