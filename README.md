@@ -1,9 +1,9 @@
 # AI-Native SOC Terraform
 
-[![Git Clones](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Little-Boy-s-Aegis/aegis-bank-deployment/main/aegis-bank-terraform-clone-badge.json)](https://github.com/Little-Boy-s-Aegis/aegis-bank-deployment)
-[![Unique Cloners](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Little-Boy-s-Aegis/aegis-bank-deployment/main/aegis-bank-terraform-uniques-badge.json)](https://github.com/Little-Boy-s-Aegis/aegis-bank-deployment)
-[![Release Downloads](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/Little-Boy-s-Aegis/aegis-bank-deployment/main/downloads-badge.json)](https://github.com/Little-Boy-s-Aegis/aegis-bank-deployment/releases)
-[![Stars](https://img.shields.io/github/stars/Little-Boy-s-Aegis/aegis-bank-terraform?style=flat&color=F59E0B&logo=github&label=stars)](https://github.com/Little-Boy-s-Aegis/aegis-bank-terraform/stargazers)
+[![Git Clones](https://badgen.net/https/cdn.jsdelivr.net/gh/Little-Boy-s-Aegis/aegis-bank-deployment@main/aegis-bank-terraform-clone-badge.json)](https://github.com/Little-Boy-s-Aegis/aegis-bank-deployment)
+[![Unique Cloners](https://badgen.net/https/cdn.jsdelivr.net/gh/Little-Boy-s-Aegis/aegis-bank-deployment@main/aegis-bank-terraform-uniques-badge.json)](https://github.com/Little-Boy-s-Aegis/aegis-bank-deployment)
+[![Release Downloads](https://badgen.net/https/cdn.jsdelivr.net/gh/Little-Boy-s-Aegis/aegis-bank-deployment@main/downloads-badge.json)](https://github.com/Little-Boy-s-Aegis/aegis-bank-deployment/releases)
+[![Stars](https://badgen.net/github/stars/Little-Boy-s-Aegis/aegis-bank-terraform?color=f59e0b)](https://github.com/Little-Boy-s-Aegis/aegis-bank-terraform/stargazers)
 
 > Part of the [Little Boy's Aegis](https://github.com/Little-Boy-s-Aegis) project -- an AI-native Security Operations Center platform.
 
