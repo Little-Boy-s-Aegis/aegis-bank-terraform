@@ -108,6 +108,26 @@ locals {
   bedrock_embedding_region   = coalesce(var.bedrock_embedding_region, var.aws_region)
   layer1_artifacts_root      = abspath("${path.root}/${var.layer1_artifacts_path}")
   layer2_artifacts_root      = abspath("${path.root}/${var.layer2_artifacts_path}")
+  dashboard_build_root       = abspath("${path.root}/${var.dashboard_build_path}")
+  dashboard_build_available  = fileexists("${local.dashboard_build_root}/index.html")
+  dashboard_asset_files      = local.dashboard_build_available ? toset(fileset(local.dashboard_build_root, "**")) : toset([])
+  dashboard_content_types = {
+    css         = "text/css"
+    gif         = "image/gif"
+    html        = "text/html"
+    ico         = "image/x-icon"
+    jpeg        = "image/jpeg"
+    jpg         = "image/jpeg"
+    js          = "application/javascript"
+    json        = "application/json"
+    map         = "application/json"
+    png         = "image/png"
+    svg         = "image/svg+xml"
+    txt         = "text/plain"
+    webmanifest = "application/manifest+json"
+    woff        = "font/woff"
+    woff2       = "font/woff2"
+  }
   layer1_artifact_files = toset(distinct(concat(
     tolist(fileset(local.layer1_artifacts_root, "README.md")),
     tolist(fileset(local.layer1_artifacts_root, "agent_*/README.md")),
@@ -1006,31 +1026,8 @@ resource "aws_wafv2_web_acl" "alb" {
     }
 
     statement {
-      and_statement {
-        statement {
-          ip_set_reference_statement {
-            arn = aws_wafv2_ip_set.blocked_ipv4.arn
-          }
-        }
-        statement {
-          not_statement {
-            statement {
-              byte_match_statement {
-                field_to_match {
-                  single_header {
-                    name = "x-aegis-surface"
-                  }
-                }
-                positional_constraint = "EXACTLY"
-                search_string         = "soc-console"
-                text_transformation {
-                  priority = 0
-                  type     = "NONE"
-                }
-              }
-            }
-          }
-        }
+      ip_set_reference_statement {
+        arn = aws_wafv2_ip_set.blocked_ipv4.arn
       }
     }
 
@@ -1327,19 +1324,35 @@ resource "aws_s3_bucket_lifecycle_configuration" "cost_optimized_logs" {
 }
 
 resource "aws_s3_object" "dashboard_placeholder" {
-  bucket       = aws_s3_bucket.dashboard.id
-  key          = "index.html"
-  content_type = "text/html"
-  content      = <<-HTML
+  count = local.dashboard_build_available ? 0 : 1
+
+  bucket        = aws_s3_bucket.dashboard.id
+  key           = "soc/index.html"
+  content_type  = "text/html"
+  cache_control = "no-store, max-age=0"
+  content       = <<-HTML
     <!doctype html>
     <html>
       <head><title>AI-Native SOC Dashboard</title></head>
       <body style="font-family:Arial,sans-serif;background:#0f172a;color:white;margin:40px">
         <h1>AI-Native SOC Dashboard</h1>
-        <p>Upload the Next.js/React static build to this S3 bucket for the hackathon UI.</p>
+        <p>Run the Vite dashboard build before applying Terraform to publish the SOC UI.</p>
       </body>
     </html>
   HTML
+}
+
+resource "aws_s3_object" "dashboard_assets" {
+  for_each = local.dashboard_asset_files
+
+  bucket       = aws_s3_bucket.dashboard.id
+  key          = "soc/${each.value}"
+  source       = "${local.dashboard_build_root}/${each.value}"
+  source_hash  = filemd5("${local.dashboard_build_root}/${each.value}")
+  content_type = lookup(local.dashboard_content_types, lower(split(".", each.value)[length(split(".", each.value)) - 1]), "application/octet-stream")
+  cache_control = each.value == "index.html" ? "no-store, max-age=0" : (
+    startswith(each.value, "assets/") ? "public, max-age=31536000, immutable" : "public, max-age=300"
+  )
 }
 
 resource "aws_s3_object" "layer1_artifacts" {
